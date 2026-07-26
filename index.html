@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>DEADMAN VOLLEY</title>
+<meta name="description" content="A roguelike where every fight is a deflection rally." />
+<link rel="stylesheet" href="css/style.css?v=1.0.1" />
+</head>
+<body>
+
+<div id="frame">
+  <canvas id="game" width="1280" height="720"></canvas>
+
+  <!-- ======================= OVERLAY UI ======================= -->
+  <div id="ui">
+
+    <!-- ---------- BOOT / TITLE ---------- -->
+    <section class="screen" id="scr-title">
+      <div class="title-bg"></div>
+      <div class="title-wrap">
+        <div class="title-mark">
+          <div class="orb-emblem"><span></span><span></span><span></span></div>
+        </div>
+        <h1 class="game-title"><em>DEADMAN</em><br/>VOLLEY</h1>
+        <p class="tagline">Return the orb. Or become the answer.</p>
+        <nav class="menu" id="title-menu">
+          <button class="mbtn" data-act="play"><span class="k">▶</span> Begin Descent</button>
+          <button class="mbtn" data-act="continue"><span class="k">↺</span> Continue Run</button>
+          <button class="mbtn" data-act="shrine"><span class="k">✦</span> Shrine of Resolve</button>
+          <button class="mbtn" data-act="codex"><span class="k">☰</span> Codex</button>
+          <button class="mbtn" data-act="settings"><span class="k">⚙</span> Settings</button>
+        </nav>
+        <div class="title-foot">
+          <span id="title-version"></span>
+          <span class="dot">•</span>
+          <span id="title-stats"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- CHARACTER SELECT ---------- -->
+    <section class="screen" id="scr-char">
+      <header class="scr-head">
+        <h2>Choose Your Vessel</h2>
+        <p class="sub">Each vessel volleys differently. Master one, then break it.</p>
+      </header>
+      <div class="char-layout">
+        <div class="char-list" id="char-list"></div>
+        <div class="char-detail" id="char-detail"></div>
+      </div>
+      <footer class="scr-foot">
+        <button class="mbtn ghost" data-act="back">Back</button>
+        <button class="mbtn primary" id="char-start">Descend</button>
+      </footer>
+    </section>
+
+    <!-- ---------- RUN MAP ---------- -->
+    <section class="screen" id="scr-map">
+      <header class="scr-head row">
+        <div>
+          <h2 id="map-sector">Sector I — The Ashen Court</h2>
+          <p class="sub" id="map-sub">Choose your path. The orb waits.</p>
+        </div>
+        <div class="run-stats" id="map-runstats"></div>
+      </header>
+      <div class="map-holder"><canvas id="mapcanvas" width="1160" height="440"></canvas></div>
+      <footer class="scr-foot">
+        <button class="mbtn ghost" data-act="pause-from-map">Menu</button>
+        <div class="hint" id="map-hint">Click a lit node to advance.</div>
+      </footer>
+    </section>
+
+    <!-- ---------- REWARD ---------- -->
+    <section class="screen" id="scr-reward">
+      <header class="scr-head">
+        <h2 id="reward-title">Spoils</h2>
+        <p class="sub" id="reward-sub">Take one.</p>
+      </header>
+      <div class="card-row" id="reward-cards"></div>
+      <footer class="scr-foot">
+        <button class="mbtn ghost" id="reward-skip">Skip (+30 Shards)</button>
+      </footer>
+    </section>
+
+    <!-- ---------- SHOP ---------- -->
+    <section class="screen" id="scr-shop">
+      <header class="scr-head row">
+        <div>
+          <h2>The Gutter Market</h2>
+          <p class="sub">The dead still take payment.</p>
+        </div>
+        <div class="run-stats" id="shop-shards"></div>
+      </header>
+      <div class="card-row" id="shop-cards"></div>
+      <footer class="scr-foot">
+        <button class="mbtn ghost" id="shop-leave">Leave</button>
+      </footer>
+    </section>
+
+    <!-- ---------- REST ---------- -->
+    <section class="screen" id="scr-rest">
+      <header class="scr-head">
+        <h2>Hollow Rest</h2>
+        <p class="sub">A moment of quiet. Spend it.</p>
+      </header>
+      <div class="card-row" id="rest-cards"></div>
+      <footer class="scr-foot"></footer>
+    </section>
+
+    <!-- ---------- EVENT ---------- -->
+    <section class="screen" id="scr-event">
+      <div class="event-wrap">
+        <h2 id="event-title">A Voice in the Dust</h2>
+        <p class="event-body" id="event-body"></p>
+        <div class="event-choices" id="event-choices"></div>
+      </div>
+    </section>
+
+    <!-- ---------- PAUSE ---------- -->
+    <section class="screen dim" id="scr-pause">
+      <div class="pause-wrap">
+        <h2>Paused</h2>
+        <div class="pause-cols">
+          <div class="pause-loadout" id="pause-loadout"></div>
+          <nav class="menu">
+            <button class="mbtn" data-act="resume">Resume</button>
+            <button class="mbtn" data-act="settings">Settings</button>
+            <button class="mbtn" data-act="codex">Codex</button>
+            <button class="mbtn danger" data-act="abandon">Abandon Run</button>
+          </nav>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- SETTINGS ---------- -->
+    <section class="screen dim" id="scr-settings">
+      <div class="panel">
+        <h2>Settings</h2>
+        <div class="settings-grid" id="settings-grid"></div>
+        <footer class="scr-foot">
+          <button class="mbtn ghost" id="settings-back">Back</button>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ---------- CODEX ---------- -->
+    <section class="screen dim" id="scr-codex">
+      <div class="panel wide">
+        <h2>Codex</h2>
+        <div class="codex-tabs" id="codex-tabs"></div>
+        <div class="codex-body" id="codex-body"></div>
+        <footer class="scr-foot">
+          <button class="mbtn ghost" id="codex-back">Back</button>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ---------- META SHRINE ---------- -->
+    <section class="screen" id="scr-meta">
+      <header class="scr-head row">
+        <div>
+          <h2>Shrine of Resolve</h2>
+          <p class="sub">What you learned in death, you keep.</p>
+        </div>
+        <div class="run-stats" id="meta-resolve"></div>
+      </header>
+      <div class="meta-grid" id="meta-grid"></div>
+      <footer class="scr-foot">
+        <button class="mbtn ghost" data-act="back">Back</button>
+      </footer>
+    </section>
+
+    <!-- ---------- GAME OVER / VICTORY ---------- -->
+    <section class="screen" id="scr-end">
+      <div class="end-wrap">
+        <h1 class="end-title" id="end-title">YOU DROPPED IT</h1>
+        <p class="end-sub" id="end-sub"></p>
+        <div class="end-stats" id="end-stats"></div>
+        <div class="end-unlocks" id="end-unlocks"></div>
+        <nav class="menu row-menu">
+          <button class="mbtn primary" data-act="retry">Descend Again</button>
+          <button class="mbtn ghost" data-act="title">Title</button>
+        </nav>
+      </div>
+    </section>
+
+    <!-- ---------- TOASTS ---------- -->
+    <div id="toasts"></div>
+
+    <!-- ---------- TOOLTIP ---------- -->
+    <div id="tooltip"></div>
+  </div>
+
+  <div id="clickcatch">
+    <div class="cc-inner">
+      <div class="orb-emblem big"><span></span><span></span><span></span></div>
+      <p>CLICK TO AWAKEN</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/util.js?v=1.0.1"></script>
+<script src="js/audio.js?v=1.0.1"></script>
+<script src="js/input.js?v=1.0.1"></script>
+<script src="js/fx.js?v=1.0.1"></script>
+<script src="js/content.js?v=1.0.1"></script>
+<script src="js/entities.js?v=1.0.1"></script>
+<script src="js/arena.js?v=1.0.1"></script>
+<script src="js/map.js?v=1.0.1"></script>
+<script src="js/ui.js?v=1.0.1"></script>
+<script src="js/game.js?v=1.0.1"></script>
+</body>
+</html>

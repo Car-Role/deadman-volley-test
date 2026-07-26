@@ -179,6 +179,8 @@ DV.UI = (function () {
       <div class="rs sh"><span class="l">Shards</span><span class="v">${run.shards}</span></div>
       <div class="rs"><span class="l">Sigils</span><span class="v">${run.sigils.length}</span></div>
       <div class="rs"><span class="l">Best Rally</span><span class="v">×${run.bestRally}</span></div>`;
+    $('map-hint').textContent = 'Click a lit node to advance · hover any node to preview the paths beyond it';
+    DV.MapGen.resetHoverCache();
     show('scr-map');
     A.setMusic('map');
   }

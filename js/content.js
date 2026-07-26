@@ -429,6 +429,12 @@ DV.Content = (function () {
       flavor: 'Tick. Tock. Tick.',
       stats: { metronome: 1 },
     },
+    {
+      id: 'both_hands', name: 'Both Hands', glyph: '⇋', rarity: 'relic', color: '#ffcf6b',
+      desc: 'You may parry your own orbs at full volley growth. A self-parried orb turns LIVE — it can strike you as well as your enemies.',
+      flavor: 'No opponent required.',
+      stats: { selfVolley: 1 },
+    },
 
     /* ---- CURSED (strong, with a real cost) ---- */
     {
@@ -506,7 +512,7 @@ DV.Content = (function () {
       hp: 84, r: 22, speed: 62, contact: 14, tier: 2, weight: 58, minSector: 1,
       shieldArc: 2.1, fireCd: 3.6, orbPower: 24, orbSpeed: 360,
       parry: { skill: 0.5, react: 0.4, cd: 1.1 }, xp: 4,
-      flavor: 'Shielded from the front. Its back has never been introduced to anyone.'
+      flavor: 'Shielded from the front. Its back has never been introduced to anyone — and a rally of 3+ shatters the shield outright.'
     },
     {
       id: 'orbiter', name: 'Wisp Choir', glyph: '✧', color: '#b46bff', ai: 'orbiter',
@@ -558,7 +564,7 @@ DV.Content = (function () {
       hp: 150, r: 27, speed: 44, contact: 16, tier: 4, weight: 24, minSector: 3,
       shieldArc: 2.6, fireCd: 3.0, orbPower: 38, orbSpeed: 400,
       parry: { skill: 0.7, react: 0.28, cd: 0.7 }, aura: 'shield', xp: 8,
-      flavor: 'Shields its neighbours. Kill it first, if you can get behind it.'
+      flavor: 'Shields its neighbours. Get behind it, or break the shield with a rally of 3+.'
     },
     {
       id: 'hollow', name: 'Hollowed', glyph: '◍', color: '#b46bff', ai: 'mirror',
@@ -786,11 +792,33 @@ and it hurts more the longer the rally has been going. <em>Return it, or become 
 </ul>
 <p>Gamepad is supported: left stick moves, right stick aims, <em>RT</em> fires, <em>RB</em> parries, <em>A</em> dashes.</p>
 
+<h3>Reading the Orb</h3>
+<p>You can tell at a glance what an orb will do to you, by its <em>shape</em>:</p>
+<ul>
+<li><em>Spiked, red-hot core</em> — an enemy orb. <em>This is the one you parry.</em> The thin outer rim is tinted
+with the colour of whatever threw it.</li>
+<li><em>Smooth rings with a forward arrow</em> — yours. It cannot hurt you. Ignore it and let it fly.</li>
+<li><em>Spiked with a white outline</em> — a <em>LIVE</em> orb (only possible with the <em>Both Hands</em> sigil).
+It is yours, it still damages enemies, and it will also kill you.</li>
+</ul>
+<p>Anything spiked can hurt you. Anything smooth cannot. Every orb past two exchanges also shows its rally count.</p>
+
 <h3>Parrying</h3>
 <p>Pressing parry opens a short window. If an orb enters your reach during it, you send it back along your aim —
 faster, and considerably angrier. Parry <em>early in the window</em> for a <em>PERFECT</em>: bigger growth, extra Ki,
 a shockwave, and a slice of slow motion.</p>
 <p>Miss, and you are locked in recovery. Parry spam is punished. Read the orb.</p>
+<p>You cannot parry your own orbs, and an orb cannot be parried twice in quick succession — one press, one return.</p>
+
+<h3>Charging</h3>
+<p>Hold <kbd>LMB</kbd> to charge a shot of your own. The instant it fills, a white ring closes in: release inside that
+ring for a <em>PERFECT RELEASE</em> — far more damage, much more speed, and the orb starts the rally two exchanges in.
+Miss the beat and you simply fire a normal full-charge shot. There is no penalty for waiting.</p>
+
+<h3>Shields</h3>
+<p><em>Sentinels</em> and <em>Wardstones</em> block almost all damage from the front. Ordinary shots bounce off —
+but an orb carrying a rally of <em>3 or more</em> punches straight through, shatters the shield permanently,
+and lands in full. The rally is the answer to the wall.</p>
 
 <h3>The Volley Counter</h3>
 <p>Each exchange raises the rally count. Orb speed and damage climb with it. A 12-volley orb is a room-clearing

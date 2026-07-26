@@ -155,9 +155,15 @@ function installBot(getArena) {
     }
     return false;
   };
+  /* Alternates between releasing exactly on the full-charge beat (perfect) and
+     letting go early, so both fire paths get exercised. */
   IN.fireDown = () => {
-    const a = getArena(); if (!a) return false;
-    return !a.orbs.some(o => o.owner === 'player') && (a.time % 1.6) < 0.75;
+    const a = getArena(); if (!a || !a.player) return false;
+    const p = a.player;
+    if (a.orbs.some(o => o.owner === 'player' && !o.live)) return false;
+    if (!p.charging) return (a.time % 1.4) < 0.7;
+    const wantPerfect = Math.floor(a.time / 3) % 2 === 0;
+    return wantPerfect ? p.charge < 1 : p.charge < 0.55;
   };
   IN.fireHit = () => false;
   IN.fireUp = () => false;
@@ -171,6 +177,182 @@ function installBot(getArena) {
   };
   IN.pollPad = noop; IN.endFrame = noop; IN.clearAll = noop;
   IN.mouse = { x: 640, y: 360 };
+}
+
+/* ============================================================
+   Global instrumentation
+   Wraps the real methods so the sweep passively proves the
+   invariants instead of us hoping they hold.
+   ============================================================ */
+const probe = {
+  parryTimes: new Map(),   // orb id -> last parry time
+  doubleParries: [],       // violations of the 0.30s lockout
+  selfParries: [],         // player-owned orbs parried without the relic
+  shieldBreaks: 0,
+  perfectReleases: 0,
+  liveOrbs: 0,
+};
+
+(function instrument() {
+  const AP = DV.Arena.prototype;
+
+  /* Count enemy returns so the lockout assertion can tell a legitimate fast
+     rally (enemy sent it back, it is a fresh threat) from the actual bug
+     (one press re-parrying the same orb with nothing in between). */
+  const realEnemyParry = AP.enemyParry;
+  AP.enemyParry = function (e, orb) {
+    orb._exchange = (orb._exchange || 0) + 1;
+    return realEnemyParry.call(this, e, orb);
+  };
+
+  /* Techniques (Phase Step, Shear) deliberately seize any orb they cross — that
+     is their printed effect, and they are Ki-costed and on cooldown. They are
+     allowed to bypass the lockout; the assertion covers hand-parries only. */
+  const realExecTech = AP.execTech;
+  AP.execTech = function (t) {
+    probe.inTech = true;
+    try { return realExecTech.call(this, t); }
+    finally { probe.inTech = false; }
+  };
+
+  const realParry = AP.parryOrb;
+  AP.parryOrb = function (orb, forced, aim) {
+    const last = probe.parryTimes.get(orb.id);
+    const ex = orb._exchange || 0;
+    if (!probe.inTech && last && this.time - last.t < 0.30 - 1e-6 && ex === last.ex) {
+      probe.doubleParries.push({ id: orb.id, gap: +(this.time - last.t).toFixed(4) });
+    }
+    if (orb.owner === 'player' && !orb.live && !this.st.selfVolley) {
+      probe.selfParries.push({ id: orb.id, volley: orb.volley });
+    }
+    probe.parryTimes.set(orb.id, { t: this.time, ex });
+    const out = realParry.call(this, orb, forced, aim);
+    if (orb.live) probe.liveOrbs++;
+    return out;
+  };
+
+  const EP = DV.Enemy.prototype;
+  const realBreak = EP.breakShield;
+  EP.breakShield = function (a) {
+    const was = this.shieldBroken;
+    const out = realBreak.call(this, a);
+    if (!was && this.shieldBroken) probe.shieldBreaks++;
+    return out;
+  };
+
+  const PP = DV.Player.prototype;
+  const realFire = PP.fire;
+  PP.fire = function (a) {
+    const out = realFire.call(this, a);
+    if (this.lastReleasePerfect) probe.perfectReleases++;
+    return out;
+  };
+})();
+
+/* ============================================================
+   Targeted checks — deterministic, no reliance on the bot
+   getting lucky during the sweep.
+   ============================================================ */
+function targetedChecks() {
+  const fails = [];
+  const mkArena = (sigils, overrides) => {
+    const game = makeGame('ronin', sigils || [], ['phase_step', 'shear'], overrides || { maxHp: 5000 });
+    const room = { index: 1, type: 'combat', sector: 1, depth: 1, waves: [[{ id: 'husk', count: 1 }]] };
+    const a = new DV.Arena(game, room);
+    a.startFight();
+    return a;
+  };
+
+  /* --- 1. your own orb is inert without the relic --- */
+  {
+    const a = mkArena();
+    const p = a.player;
+    const orb = a.spawnOrb({
+      x: p.x + 30, y: p.y, angle: Math.PI, speed: 200,
+      owner: 'player', damage: 20, r: 12, volley: 1, grace: 0,
+    });
+    p.parryT = p.parryWindow;
+    a.resolveOrbCollisions(1 / 60);
+    if (orb.volley !== 1) fails.push('self-parry: own orb was parried without Both Hands');
+    if (orb.live) fails.push('self-parry: own orb went live without the relic');
+  }
+
+  /* --- 2. Both Hands re-opens it, and the orb turns LIVE --- */
+  {
+    const a = mkArena(['both_hands']);
+    const p = a.player;
+    if (!a.st.selfVolley) fails.push('both_hands: selfVolley stat did not resolve');
+    const orb = a.spawnOrb({
+      x: p.x + 30, y: p.y, angle: Math.PI, speed: 200,
+      owner: 'player', damage: 20, r: 12, volley: 1, grace: 0,
+    });
+    p.parryT = p.parryWindow;
+    a.resolveOrbCollisions(1 / 60);
+    if (orb.volley !== 2) fails.push(`both_hands: own orb not parried (volley=${orb.volley})`);
+    if (!orb.live) fails.push('both_hands: parried own orb did not turn LIVE');
+    if (!orb.hostile) fails.push('both_hands: LIVE orb is not hostile to the player');
+    if (orb.owner !== 'player') fails.push('both_hands: LIVE orb lost player ownership (would stop hurting enemies)');
+  }
+
+  /* --- 3. an orb cannot be re-parried inside the lockout --- */
+  {
+    const a = mkArena(['both_hands']);
+    const p = a.player;
+    const orb = a.spawnOrb({
+      x: p.x + 30, y: p.y, angle: Math.PI, speed: 200,
+      owner: 'enemy', damage: 20, r: 12, volley: 0, grace: 0,
+    });
+    p.parryT = p.parryWindow;
+    a.resolveOrbCollisions(1 / 60);
+    const after = orb.volley;
+    /* keep it in reach and the window open, then hammer it */
+    for (let i = 0; i < 20; i++) {
+      orb.x = p.x + 20; orb.y = p.y;
+      p.parryT = p.parryWindow;
+      a.resolveOrbCollisions(1 / 60);
+    }
+    if (orb.volley !== after) {
+      fails.push(`lockout: orb re-parried ${orb.volley - after}x inside 0.30s (this was the 5-per-click bug)`);
+    }
+  }
+
+  /* --- 4. a 3+ rally shatters a shield; a weak orb does not --- */
+  {
+    const a = mkArena();
+    const weak = a.spawnEnemy('sentinel', 400, 300);
+    weak.spawnT = 0; weak.facing = 0;                       // shield faces +x
+    const inc = { vx: -100, vy: 0, volley: 1, color: '#fff' };  // arriving from +x
+    a.hitEnemy(weak, 100, { orb: inc, source: 'test' });
+    if (weak.shieldBroken) fails.push('shield: a volley-1 orb broke the shield');
+
+    const strong = a.spawnEnemy('sentinel', 700, 300);
+    strong.spawnT = 0; strong.facing = 0;
+    const hpBefore = strong.hp;
+    a.hitEnemy(strong, 100, { orb: { vx: -100, vy: 0, volley: 3, color: '#fff' }, source: 'test' });
+    if (!strong.shieldBroken) fails.push('shield: a volley-3 orb failed to break the shield');
+    if (hpBefore - strong.hp < 90) fails.push(`shield: break-through was still mitigated (dealt ${(hpBefore - strong.hp).toFixed(1)} of 100)`);
+    if (strong.blocks(Math.PI)) fails.push('shield: blocks() still true after breaking');
+  }
+
+  /* --- 5. perfect release pays out, late release does not --- */
+  {
+    const a = mkArena();
+    const p = a.player;
+    p.charge = 1; p.chargeFullT = a.time;                 // released on the beat
+    const good = p.fire(a);
+    if (!p.lastReleasePerfect) fails.push('perfect release: on-beat release not detected');
+    if (good.volley !== 2) fails.push(`perfect release: expected volley 2, got ${good.volley}`);
+
+    p.charge = 1; p.chargeFullT = a.time - 1.0;           // long past the window
+    const late = p.fire(a);
+    if (p.lastReleasePerfect) fails.push('perfect release: late release wrongly counted as perfect');
+    if (late.volley !== 1) fails.push(`perfect release: late shot should be volley 1, got ${late.volley}`);
+    if (!(good.damage > late.damage * 1.4)) {
+      fails.push(`perfect release: bonus too small (${good.damage.toFixed(1)} vs ${late.damage.toFixed(1)})`);
+    }
+  }
+
+  return fails;
 }
 
 /* ============================================================
@@ -225,6 +407,16 @@ function main() {
   const failures = [];
   const vessels = args.vessel ? [args.vessel] : C.VESSELS.map(v => v.id);
 
+  /* deterministic invariant checks first — cheap, and they fail loudly */
+  const checkFails = targetedChecks();
+  if (checkFails.length) {
+    console.log('\n──────── TARGETED CHECKS ────────');
+    for (const f of checkFails) console.error('  ✗ ' + f);
+  } else {
+    console.log('✓ targeted checks: self-parry gating, Both Hands, parry lockout, shield break, perfect release');
+  }
+  for (const f of checkFails) failures.push({ label: 'check', msg: f, stack: '' });
+
   for (const vId of vessels) {
     /* every sigil bound at once — the worst case for hook interactions */
     const sigils = args.sigils === 'none' ? [] : ALL_SIGILS;
@@ -276,6 +468,20 @@ function main() {
   console.log(`peak enemies    : ${Math.max(...results.map(r => r.peakEnemies), 0)}`);
   console.log('slowest frames  :');
   for (const s of slow) console.log(`   ${s.slowestFrame}ms  ${s.label} (frame ${s.slowestAt}, orbs ${s.peakOrbs})`);
+
+  /* ---- invariants observed across the whole sweep ---- */
+  console.log('\n──────── INVARIANTS ────────');
+  const inv = (ok, label, detail) => {
+    console.log(`${ok ? '  ✓' : '  ✗'} ${label}${detail ? '  — ' + detail : ''}`);
+    if (!ok) failures.push({ label: 'invariant', msg: label + ' ' + (detail || ''), stack: '' });
+  };
+  inv(probe.doubleParries.length === 0, 'no orb re-parried within 0.30s without an enemy return',
+    probe.doubleParries.length ? `${probe.doubleParries.length} violations, e.g. gap ${probe.doubleParries[0].gap}s` : 'lockout holding');
+  inv(probe.selfParries.length === 0, 'own orbs never parried without Both Hands',
+    probe.selfParries.length ? `${probe.selfParries.length} violations` : 'gating holding');
+  inv(probe.shieldBreaks > 0, 'shield break-through exercised', `${probe.shieldBreaks} shields shattered`);
+  inv(probe.perfectReleases > 0, 'perfect release exercised', `${probe.perfectReleases} on-beat releases`);
+  inv(probe.liveOrbs > 0, 'LIVE (Both Hands) orbs exercised', `${probe.liveOrbs} self-parries`);
   if (failures.length) {
     console.log('\nFAILURES:');
     for (const f of failures.slice(0, 10)) console.log(` • ${f.label}\n   ${f.msg}\n${f.stack}`);

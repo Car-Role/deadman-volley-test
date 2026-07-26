@@ -7,6 +7,8 @@
   const U = DV.U, FX = DV.FX, R = U.rnd, A = DV.Audio, C = DV.Content;
 
   const W = 1280, H = 720;
+  /* rally needed to punch through a Sentinel's shield — mirrored in entities.js */
+  const SHIELD_BREAK_VOLLEY = 3;
 
   class Arena {
     constructor(game, room) {
@@ -319,15 +321,22 @@
         crit = true; d *= this.st.critMult || 1.9;
       }
 
-      /* sentinel shield */
-      if (opts.orb && e.def.shieldArc) {
+      /* Sentinel shield. An ordinary shot bounces off the front — but an orb
+         carrying a long enough rally punches straight through and shatters it.
+         The rally is the answer to the wall. */
+      if (opts.orb && e.def.shieldArc && !e.shieldBroken) {
         const inc = Math.atan2(opts.orb.vy, opts.orb.vx);
         if (e.blocks(inc)) {
-          d *= 0.12;
-          A.play('shield_break');
-          FX.text(e.x, e.y - e.r - 20, 'BLOCKED', { color: '#6be6ff', size: 17 });
-          FX.ring({ x: e.x, y: e.y, r: e.r + 8, rEnd: e.r + 34, life: 0.3, color: '#6be6ff', w: 3, arc: e.def.shieldArc, angle: e.facing });
-          FX.shake(3);
+          if (opts.orb.volley >= SHIELD_BREAK_VOLLEY) {
+            e.breakShield(this);           /* full damage lands */
+          } else {
+            d *= 0.12;
+            A.play('shield_break');
+            /* label the requirement so the rule teaches itself */
+            FX.text(e.x, e.y - e.r - 20, `BLOCKED  ×${opts.orb.volley}/${SHIELD_BREAK_VOLLEY}`, { color: '#6be6ff', size: 16 });
+            FX.ring({ x: e.x, y: e.y, r: e.r + 8, rEnd: e.r + 34, life: 0.3, color: '#6be6ff', w: 3, arc: e.def.shieldArc, angle: e.facing });
+            FX.shake(3);
+          }
         }
       }
 
@@ -523,6 +532,14 @@
       }
       if (perfect) { orb.damage *= 1.15; orb.speed *= 1.04; }
 
+      /* Both Hands: catching your own orb keeps it yours (so it still damages
+         enemies) but makes it LIVE — it will now also kill you. That risk is
+         what stops self-rallying from being free infinite scaling. */
+      if (orb.owner === 'player' && !orb.live && st.selfVolley) {
+        orb.live = true;
+        FX.text(p.x, p.y - 30, 'LIVE', { color: '#ff4d5e', size: 16, crit: true });
+      }
+
       orb.owner = 'player';
       orb.source = null;
       orb.judged.clear();
@@ -532,6 +549,7 @@
       orb.bounces = Math.max(orb.bounces, 6);
       orb.homing = st.homing || 0;
       orb.lastParryT = this.time;
+      orb.parryLockUntil = this.time + 0.30;
       orb.setAngle(ang, orb.speed);
       orb.x = p.x + Math.cos(ang) * (p.r + orb.r + 2);
       orb.y = p.y + Math.sin(ang) * (p.r + orb.r + 2);
@@ -661,10 +679,12 @@
       orb.speed *= 1.10;
       if (this.modifier && this.modifier.id === 'volatile') orb.speed *= 1.06;
       orb.owner = 'enemy';
+      orb.live = false;          /* hostile by ownership now; the flag is redundant */
       orb.source = e;
       orb.color = e.color;
       orb.grace = 0.06;
       orb.homing = 0;
+      orb.parryLockUntil = this.time + 0.06;   /* brief, so the rally still flows */
       orb.setAngle(ang, orb.speed);
       orb.x = e.x + Math.cos(ang) * (e.r + orb.r + 2);
       orb.y = e.y + Math.sin(ang) * (e.r + orb.r + 2);
@@ -1048,10 +1068,19 @@
           }
 
           const reach = p.parryRadius + o.r;
-          const canCatch = p.parryT > 0 || p.bastionT > 0 || p.chainT > 0;
+
+          /* Only threats are parryable. Your own returned orb is inert — without
+             this, firing into a wall and re-catching it scales forever for free.
+             The Both Hands relic re-opens it, at the price of making the orb LIVE. */
+          const eligible = o.hostile || (this.st.selfVolley && o.owner === 'player');
+          /* ...and no orb may be caught twice in quick succession. Collisions run
+             several substeps per frame, so without this one press re-parries the
+             same orb repeatedly while it is still inside your reach. */
+          const unlocked = this.time >= (o.parryLockUntil || 0);
+          const canCatch = eligible && unlocked && (p.parryT > 0 || p.bastionT > 0 || p.chainT > 0);
 
           /* timeslip */
-          if (this.st.timeslip && o.owner === 'enemy' && d < reach + 8 && !o.slipped) {
+          if (this.st.timeslip && o.hostile && d < reach + 8 && !o.slipped) {
             o.slipped = true;
             FX.slow(0.22, 0.55);
           }
@@ -1066,8 +1095,8 @@
             if (p.parryT > 0) { this.parryOrb(o); continue; }
           }
 
-          /* damaging hit */
-          if (o.owner === 'enemy' && d < p.r + o.r) {
+          /* damaging hit — LIVE orbs are yours and still bite */
+          if (o.hostile && d < p.r + o.r) {
             if (p.intangible > 0 || p.iframe > 0) { /* pass through */ }
             else {
               const dealt = this.damagePlayer(o.damage, 'orb');
@@ -1374,7 +1403,7 @@
       /* ---- vessel chip ---- */
       ctx.textAlign = 'left';
       ctx.font = '600 11px "Rajdhani",sans-serif';
-      ctx.fillStyle = 'rgba(154,149,180,.85)';
+      ctx.fillStyle = 'rgba(154,149,180,.95)';
       ctx.fillText(this.run.vessel.name.toUpperCase(), hx + st.dashCharges * 22 + 12, dy + 7);
 
       /* ---- top-right: run info ---- */
@@ -1383,7 +1412,7 @@
       ctx.fillStyle = this.sector.color;
       ctx.fillText(`SECTOR ${U.roman(this.room.sector)}`, W - 30, 32);
       ctx.font = '600 12px "Rajdhani",sans-serif';
-      ctx.fillStyle = 'rgba(154,149,180,.9)';
+      ctx.fillStyle = 'rgba(154,149,180,.95)';
       const label = this.room.type === 'boss' ? 'BOSS' : this.room.type === 'elite' ? 'ELITE' : `ROOM ${this.room.depth}`;
       ctx.fillText(label + (this.modifier ? '  ·  ' + this.modifier.name.toUpperCase() : ''), W - 30, 52);
       ctx.font = '700 17px "Rajdhani",sans-serif';
@@ -1455,7 +1484,7 @@
         ctx.globalAlpha = alpha;
         ctx.textAlign = 'center';
         ctx.font = '700 12px "Rajdhani",sans-serif';
-        ctx.fillStyle = 'rgba(154,149,180,.85)';
+        ctx.fillStyle = 'rgba(154,149,180,.95)';
         ctx.fillText('RALLY', W / 2, 30);
         ctx.save();
         ctx.translate(W / 2, 60);
@@ -1496,7 +1525,7 @@
         ctx.fillText(bd.name, W / 2, by - 16);
         ctx.shadowBlur = 0;
         ctx.font = '600 10px "Rajdhani",sans-serif';
-        ctx.fillStyle = 'rgba(154,149,180,.8)';
+        ctx.fillStyle = 'rgba(154,149,180,.95)';
         ctx.fillText(bd.subtitle.toUpperCase(), W / 2, by - 2);
 
         ctx.fillStyle = 'rgba(6,5,12,.85)';
@@ -1598,7 +1627,7 @@
 
       ctx.globalAlpha = Math.min(U.clamp((t - 0.6) / 0.5, 0, 1), out);
       ctx.font = 'italic 17px Inter,system-ui,sans-serif';
-      ctx.fillStyle = 'rgba(154,149,180,.9)';
+      ctx.fillStyle = 'rgba(154,149,180,.95)';
       ctx.fillText('“' + bd.intro + '”', W / 2, H / 2 + 60);
       ctx.restore();
     }

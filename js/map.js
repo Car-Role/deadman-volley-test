@@ -202,6 +202,33 @@ DV.MapGen = (function () {
   }
 
   /* ============================================================
+     HOVER PREVIEW
+     Every node and edge reachable from `node` by following .next.
+     Cached, because draw() runs every frame but the hover rarely changes.
+     ============================================================ */
+  let _closureCache = { id: null, res: null };
+
+  function forwardClosure(node) {
+    if (_closureCache.id === node.id && _closureCache.res) return _closureCache.res;
+    const nodes = new Set([node]);
+    const edges = new Set();
+    const stack = [node];
+    while (stack.length) {
+      const n = stack.pop();
+      for (const nx of n.next) {
+        edges.add(n.id + '>' + nx.id);
+        if (!nodes.has(nx)) { nodes.add(nx); stack.push(nx); }
+      }
+    }
+    const res = { nodes, edges };
+    _closureCache = { id: node.id, res };
+    return res;
+  }
+
+  /* call when the graph itself changes (new sector) */
+  function resetHoverCache() { _closureCache = { id: null, res: null }; }
+
+  /* ============================================================
      DRAWING
      ============================================================ */
   function draw(ctx, map, hover, t) {
@@ -224,35 +251,58 @@ DV.MapGen = (function () {
     for (let y = 0; y < MH; y += 40) { ctx.moveTo(0, y); ctx.lineTo(MW, y); }
     ctx.stroke();
 
-    /* ---- edges ---- */
+    /* ---- edges ----
+       Four tiers, drawn in order so the important ones land on top. Hovering
+       any node lights every route reachable from it and mutes everything else. */
+    const cl = hover ? forwardClosure(hover) : null;
+
+    const edgePath = (n, nx) => {
+      const mx = (n.x + nx.x) / 2;
+      ctx.beginPath();
+      ctx.moveTo(n.x, n.y);
+      ctx.bezierCurveTo(mx, n.y, mx, nx.y, nx.x, nx.y);
+    };
+
+    const tiers = [[], [], [], []];   /* 0 base, 1 walked, 2 live, 3 highlighted */
     for (const n of map.nodes) {
       for (const nx of n.next) {
-        const walked = n.visited && nx.visited;
-        const live = n.current && nx.available;
-        ctx.save();
-        ctx.lineCap = 'round';
-        if (live) {
-          ctx.strokeStyle = U.rgba(S.color, 0.85);
-          ctx.lineWidth = 2.6;
-          ctx.setLineDash([7, 6]);
-          ctx.lineDashOffset = -t * 26;
-          ctx.shadowColor = S.color; ctx.shadowBlur = 12;
-        } else if (walked) {
-          ctx.strokeStyle = U.rgba(S.color, 0.4);
-          ctx.lineWidth = 2;
-        } else {
-          ctx.strokeStyle = 'rgba(120,112,160,.16)';
-          ctx.lineWidth = 1.4;
-          ctx.setLineDash([4, 7]);
-        }
-        ctx.beginPath();
-        const mx = (n.x + nx.x) / 2;
-        ctx.moveTo(n.x, n.y);
-        ctx.bezierCurveTo(mx, n.y, mx, nx.y, nx.x, nx.y);
-        ctx.stroke();
-        ctx.restore();
+        const hi = cl && cl.edges.has(n.id + '>' + nx.id);
+        if (hi) tiers[3].push([n, nx]);
+        else if (n.current && nx.available) tiers[2].push([n, nx]);
+        else if (n.visited && nx.visited) tiers[1].push([n, nx]);
+        else tiers[0].push([n, nx]);
       }
     }
+    /* everything outside a hovered route recedes */
+    const mute = cl ? 0.28 : 1;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+
+    ctx.strokeStyle = U.rgba('#968ec3', 0.38 * mute);
+    ctx.lineWidth = 2;
+    for (const [n, nx] of tiers[0]) { edgePath(n, nx); ctx.stroke(); }
+
+    ctx.strokeStyle = U.rgba(S.color, 0.45 * mute);
+    ctx.lineWidth = 2.2;
+    for (const [n, nx] of tiers[1]) { edgePath(n, nx); ctx.stroke(); }
+
+    ctx.strokeStyle = U.rgba(S.color, 0.9 * mute);
+    ctx.lineWidth = 3;
+    ctx.setLineDash([7, 6]);
+    ctx.lineDashOffset = -t * 26;
+    ctx.shadowColor = S.color; ctx.shadowBlur = 12;
+    for (const [n, nx] of tiers[2]) { edgePath(n, nx); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.shadowBlur = 0;
+
+    if (tiers[3].length) {
+      ctx.strokeStyle = U.rgba(S.accent, 0.92);
+      ctx.lineWidth = 3.2;
+      ctx.shadowColor = S.accent; ctx.shadowBlur = 14;
+      for (const [n, nx] of tiers[3]) { edgePath(n, nx); ctx.stroke(); }
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
 
     /* ---- nodes ---- */
     for (const n of map.nodes) {
@@ -280,7 +330,7 @@ DV.MapGen = (function () {
       /* body */
       const dim = !active && !n.visited && !n.current;
       ctx.fillStyle = n.visited ? 'rgba(20,17,34,.95)' : 'rgba(11,10,20,.95)';
-      ctx.strokeStyle = dim ? 'rgba(110,102,150,.35)' : U.rgba(T.color, active ? 1 : 0.7);
+      ctx.strokeStyle = dim ? 'rgba(140,132,180,.55)' : U.rgba(T.color, active ? 1 : 0.8);
       ctx.lineWidth = n.current ? 3.4 : active ? 2.6 : 1.6;
       const sides = n.type === 'boss' ? 8 : n.type === 'elite' ? 3 : n.type === 'shop' ? 4 : 6;
       U.poly(ctx, 0, 0, sides, r, null, n.type === 'elite' ? -Math.PI / 2 : (n.type === 'shop' ? Math.PI / 4 : 0));
@@ -297,7 +347,7 @@ DV.MapGen = (function () {
       }
 
       /* glyph */
-      ctx.fillStyle = dim ? 'rgba(140,132,180,.5)' : T.color;
+      ctx.fillStyle = dim ? 'rgba(168,160,205,.8)' : T.color;
       ctx.font = `700 ${n.type === 'boss' ? 24 : 17}px "Rajdhani",sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(T.glyph, 0, 1);
@@ -310,6 +360,13 @@ DV.MapGen = (function () {
         ctx.moveTo(-5, 0); ctx.lineTo(-1, 5); ctx.lineTo(6, -5);
         ctx.stroke();
         ctx.globalAlpha = 1;
+      }
+
+      /* on a hovered route */
+      if (cl && cl.nodes.has(n)) {
+        ctx.strokeStyle = U.rgba(S.accent, isHover ? 0.95 : 0.6);
+        ctx.lineWidth = isHover ? 2.6 : 1.6;
+        ctx.beginPath(); ctx.arc(0, 0, r + (isHover ? 12 : 7), 0, U.TAU); ctx.stroke();
       }
 
       /* current marker */
@@ -325,7 +382,7 @@ DV.MapGen = (function () {
         ctx.save();
         ctx.textAlign = 'center';
         ctx.font = '700 10.5px "Rajdhani",sans-serif';
-        ctx.fillStyle = U.rgba(T.color, active || isHover ? 0.95 : 0.55);
+        ctx.fillStyle = U.rgba(T.color, active || isHover ? 0.95 : 0.8);
         ctx.fillText(T.name.toUpperCase(), n.x, n.y + r + 16);
         if (n.modifier) {
           const mod = C.MODIFIERS.find(m => m.id === n.modifier);
@@ -340,7 +397,7 @@ DV.MapGen = (function () {
     /* row markers */
     ctx.save();
     ctx.font = '600 9px "Rajdhani",sans-serif';
-    ctx.fillStyle = 'rgba(120,112,160,.4)';
+    ctx.fillStyle = 'rgba(154,149,180,.9)';
     ctx.textAlign = 'center';
     for (let r = 0; r < map.rows; r++) {
       const xs = map.nodes.filter(n => n.row === r);
@@ -359,5 +416,5 @@ DV.MapGen = (function () {
     return null;
   }
 
-  return { generate, advance, buildRoom, draw, hitTest, NODE_TYPES, MW, MH };
+  return { generate, advance, buildRoom, draw, hitTest, forwardClosure, resetHoverCache, NODE_TYPES, MW, MH };
 })();

@@ -159,6 +159,15 @@ DV.Audio = (function () {
       tone({ type: 'sine', f: 1400, f2: 2100, dur: 0.18, v: 0.1, space: 0.3 });
       tone({ type: 'sine', f: 700, f2: 1050, dur: 0.2, v: 0.08 });
     },
+    /* released inside the beat — bright, obviously "you nailed it" */
+    charge_perfect() {
+      const t = now();
+      [784, 1175, 1568].forEach((f, i) =>
+        tone({ type: 'square', f, f2: f * 1.5, dur: 0.16, v: 0.11, t: t + i * 0.028, space: 0.4 }));
+      tone({ type: 'sine', f: 2350, f2: 3400, dur: 0.22, v: 0.07, t, space: 0.45 });
+      noise({ ff: 7000, ff2: 1600, dur: 0.14, v: 0.13, t });
+      tone({ type: 'sine', f: 95, f2: 44, dur: 0.28, v: 0.36, t });
+    },
     fire(power) {
       const p = power || 0;
       const t = now();

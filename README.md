@@ -40,6 +40,19 @@ Gamepad is supported: left stick moves, right stick aims, **RT** fires, **RB** p
 
 ---
 
+## Reading the orb
+
+You can tell what an orb will do to you from its **shape**, before you read any colour:
+
+| | |
+|---|---|
+| **Spiked, red-hot core** | An enemy orb. **This is the one you parry.** The thin outer rim is tinted with the colour of whatever threw it. |
+| **Smooth rings + forward arrow** | Yours. It cannot hurt you. Ignore it. |
+| **Spiked with a white outline** | A **LIVE** orb — only possible with the *Both Hands* relic. Yours, still damages enemies, and will also kill you. |
+
+Anything spiked can hurt you; anything smooth cannot. Every orb past two exchanges also
+carries its rally count, and hostile orbs draw a reticle that tightens as they close on you.
+
 ## The mechanic
 
 Pressing parry opens a **short active window**. If an orb enters your reach during it,
@@ -48,11 +61,26 @@ you send it back along your aim.
 - Parry **early in the window** for a **PERFECT** — bigger growth, extra Ki, a shockwave, and slow motion.
 - **Miss** and you're locked in recovery. Parry spam is punished. Read the orb.
 - Every exchange raises the **rally counter**. Speed and damage climb with it.
+- You **cannot parry your own orbs**, and no orb can be parried twice in quick succession —
+  one press, one return.
 
 **Aim is the real decision.** Some enemies return orbs reliably (Mirrorwardens ~96%,
 Duelists ~72%); others can't parry at all (Husks, Censers). Build a monstrous rally
 against a good returner, then aim the finish at something that can't answer.
 A white ring around an enemy means *it intends to return your next orb*.
+
+## Charging
+
+Hold **LMB** to charge a shot. The instant it fills, a white ring closes in — release
+inside that ring for a **PERFECT RELEASE**: ×1.6 damage, ×1.35 speed, and the orb starts
+the rally two exchanges in. Miss the beat and you simply fire a normal full-charge shot.
+There is no penalty for waiting for a safe opening.
+
+## Shields
+
+*Sentinels* and *Wardstones* block ~88% of damage from the front, and show three pips on
+the shield arc. An orb carrying a rally of **3 or more** punches straight through, lands in
+full, and **shatters the shield permanently**. The rally is the answer to the wall.
 
 ---
 
@@ -106,6 +134,14 @@ node tools/soak.js --watchdog=2000      # abort if any frame exceeds 2000ms
 
 It binds **every sigil at once** — the worst case for hook interactions — and exits
 non-zero if any frame throws or trips the watchdog. The full sweep simulates 312 rooms.
+
+It also runs deterministic checks and asserts invariants across the whole sweep:
+
+- your own orbs are never parried without *Both Hands*
+- no orb is re-parried within 0.30s without an enemy return in between
+- a volley-2 orb does **not** break a shield; a volley-3 orb does, in full
+- an on-beat release pays out and a late release does not
+- shield-break, perfect-release and LIVE-orb paths are all actually exercised
 
 ---
 

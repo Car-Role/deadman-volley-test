@@ -4,7 +4,7 @@
    ============================================================ */
 window.DV = window.DV || {};
 
-DV.VERSION = "1.0.1";
+DV.VERSION = "1.0.3";
 
 /* Backing-store resolution multipliers, set by game.js on resize.
    All draw code works in logical 1280x720 units; `q` maps those to device pixels. */

@@ -7,6 +7,15 @@
 (function () {
   const U = DV.U, FX = DV.FX, R = U.rnd, A = DV.Audio;
 
+  /* One colour for "this can hurt you", regardless of what threw it. */
+  const DANGER = '#ff4d5e';
+  /* An orb carrying this many exchanges punches through a shield. */
+  const SHIELD_BREAK_VOLLEY = 3;
+  /* How long after being returned an orb refuses to be parried again. */
+  const PARRY_LOCKOUT = 0.30;
+  /* Release window after the charge fills, for a PERFECT RELEASE. */
+  const PERFECT_RELEASE = 0.18;
+
   /* ============================================================
      ORB — the star of the show
      ============================================================ */
@@ -51,7 +60,14 @@
       this.tag = o.tag || null;
       this.seek = o.seek || null;            // entity to home onto (echo orbs)
       this.scale = 0;                        // spawn pop
+      /* A LIVE orb is owner:'player' (so it still damages enemies) but is also
+         hostile to the player. Only produced by the Both Hands relic. */
+      this.live = false;
+      this.parryLockUntil = 0;               // set on parry; blocks instant re-catches
     }
+
+    /* true for anything that can damage the player — drives the spiked silhouette */
+    get hostile() { return this.owner === 'enemy' || this.live; }
 
     get angle() { return Math.atan2(this.vy, this.vx); }
 
@@ -160,7 +176,15 @@
       const s = U.ease.outBack(U.clamp(this.scale, 0, 1));
       const r = this.r * s;
       const v = Math.min(this.volley, 20);
-      const hot = U.mixHex(this.color, '#ffffff', 0.55 + Math.min(0.4, v * 0.02));
+
+      /* ---- ownership language --------------------------------------------
+         hostile  -> SPIKED silhouette + unified danger core. "Parry this."
+         friendly -> SMOOTH rings + forward chevron. "Ignore this."
+         live     -> spiked (it can kill you) but in your own colour + white rim.
+         Shape carries the signal; colour is only ever a secondary cue.        */
+      const hostile = this.hostile;
+      const bodyCol = hostile ? (this.live ? this.color : DANGER) : this.color;
+      const hot = U.mixHex(bodyCol, '#ffffff', 0.55 + Math.min(0.4, v * 0.02));
 
       /* trail */
       const t = this.trail;
@@ -169,7 +193,7 @@
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         for (let pass = 0; pass < 2; pass++) {
-          ctx.strokeStyle = pass ? hot : this.color;
+          ctx.strokeStyle = pass ? hot : bodyCol;
           ctx.beginPath();
           ctx.moveTo(t[0], t[1]);
           for (let i = 2; i < t.length; i += 2) ctx.lineTo(t[i], t[i + 1]);
@@ -185,7 +209,43 @@
 
       /* outer bloom (cached sprite — see FX.glow) */
       const bloom = Math.min(r * (3.6 + v * 0.12), 190);
-      FX.glow(ctx, this.x, this.y, bloom, this.color, 1, 'orb');
+      FX.glow(ctx, this.x, this.y, bloom, bodyCol, 1, 'orb');
+
+      if (hostile) {
+        /* --- SPIKES: the "you must deal with this" silhouette --- */
+        const spin = this.rot * 0.9;
+        ctx.fillStyle = U.rgba(hot, 0.9);
+        U.poly(ctx, this.x, this.y, 5, r * 1.95, r * 1.02, spin);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.4;
+        ctx.globalAlpha = this.live ? 0.55 + 0.35 * Math.sin(a.time * 11) : 0.4;
+        U.poly(ctx, this.x, this.y, 5, r * 1.95, r * 1.02, spin);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        /* source rim — which enemy threw it (flavour, not the primary signal) */
+        if (!this.live) {
+          ctx.strokeStyle = U.rgba(this.color, 0.85);
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(this.x, this.y, r * 2.25, 0, U.TAU); ctx.stroke();
+        }
+      } else {
+        /* --- FRIENDLY: smooth ring + a chevron pointing where it is going --- */
+        ctx.strokeStyle = U.rgba(hot, 0.7);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(this.x, this.y, r * 1.5, 0, U.TAU); ctx.stroke();
+
+        const ang = this.angle;
+        const cx = this.x + Math.cos(ang) * r * 2.1;
+        const cy = this.y + Math.sin(ang) * r * 2.1;
+        ctx.fillStyle = U.rgba(hot, 0.9);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r * 0.85, cy + Math.sin(ang) * r * 0.85);
+        ctx.lineTo(cx + Math.cos(ang + 2.4) * r * 0.7, cy + Math.sin(ang + 2.4) * r * 0.7);
+        ctx.lineTo(cx + Math.cos(ang - 2.4) * r * 0.7, cy + Math.sin(ang - 2.4) * r * 0.7);
+        ctx.closePath(); ctx.fill();
+      }
 
       /* core */
       ctx.fillStyle = '#fff';
@@ -222,16 +282,33 @@
         U.poly(ctx, this.x, this.y, 3, r * 2.2, null, a.time * 3);
         ctx.stroke();
       }
+
+      /* ---- closing reticle: a ring that tightens as impact approaches ----
+         This is the parry-timing tell. Blind Faith trades it away.          */
+      if (hostile && a.player && a.player.alive && !a.st.noTelegraph) {
+        const px = a.player.x, py = a.player.y;
+        const d = U.dist(this.x, this.y, px, py);
+        const closing = ((px - this.x) * this.vx + (py - this.y) * this.vy) > 0;
+        if (closing && d < 240) {
+          const k = U.clamp(d / 240, 0, 1);          /* 1 = far, 0 = on top of you */
+          const rr = r * 1.6 + k * 34;
+          ctx.strokeStyle = U.rgba('#ffffff', (1 - k) * 0.7);
+          ctx.lineWidth = 1.6 + (1 - k) * 1.8;
+          U.poly(ctx, this.x, this.y, 4, rr, null, this.rot * 0.5);
+          ctx.stroke();
+        }
+      }
       ctx.restore();
 
-      /* ownership tick */
-      if (this.owner === 'player' && v >= 3) {
+      /* rally count — shown on EVERY orb past two exchanges. A high-volley
+         enemy orb is the most dangerous thing on screen; it needs a number. */
+      if (v >= 2) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.font = '700 12px "Rajdhani",Arial Narrow,sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = U.rgba(hot, 0.85);
-        ctx.fillText('×' + this.volley, this.x, this.y - r - 11);
+        ctx.fillStyle = U.rgba(hostile ? '#ffffff' : hot, 0.9);
+        ctx.fillText('×' + this.volley, this.x, this.y - r - 13);
         ctx.restore();
       }
     }
@@ -268,6 +345,8 @@
       this.charge = 0;
       this.charging = false;
       this.fireCd = 0;
+      this.chargeFullT = -1;      /* arena time the charge filled; -1 = not full */
+      this.lastReleasePerfect = false;
 
       this.dashT = 0;
       this.dashCd = 0;
@@ -467,11 +546,16 @@
       /* ---- charge / fire ---- */
       this.fireCd = Math.max(0, this.fireCd - dt);
       if (controllable && IN.fireDown() && this.whiff <= 0 && this.fireCd <= 0) {
-        if (!this.charging) { this.charging = true; A.play('charge_start'); }
+        if (!this.charging) { this.charging = true; this.chargeFullT = -1; A.play('charge_start'); }
         const ct = st.chargeTime * (st.chargeTimeMult || 1);
         const prev = this.charge;
         this.charge = Math.min(1, this.charge + dt / ct);
-        if (prev < 1 && this.charge >= 1) A.play('charge_full');
+        if (prev < 1 && this.charge >= 1) {
+          /* the beat opens here — release inside PERFECT_RELEASE for the bonus */
+          this.chargeFullT = a.time;
+          A.play('charge_full');
+          FX.ring({ x: this.x, y: this.y, r: 34, rEnd: 16, life: 0.18, color: '#ffffff', w: 3, ease: 'outQuad' });
+        }
         if (R.chance(0.55)) {
           const ang = R.range(0, U.TAU);
           const d = 46 - this.charge * 26;
@@ -499,20 +583,48 @@
     fire(a) {
       const st = this.st;
       const c = this.charge;
+      /* PERFECT RELEASE: let go inside the window that opens when the charge fills.
+         Missing it is not punished — you just get an ordinary full-charge shot. */
+      const perfect = c >= 0.99 && this.chargeFullT >= 0 && (a.time - this.chargeFullT) <= PERFECT_RELEASE;
+      this.lastReleasePerfect = perfect;
       this.charge = 0;
+      this.chargeFullT = -1;
       this.fireCd = 0.16;
-      const dmg = (13 + 27 * c) * st.power * (st.powerMult || 1);
-      const sp = st.orbSpeed * (st.orbSpeedMult || 1) * (0.78 + 0.34 * c);
+
+      let dmg = (13 + 27 * c) * st.power * (st.powerMult || 1);
+      let sp = st.orbSpeed * (st.orbSpeedMult || 1) * (0.78 + 0.34 * c);
+      let rad = 9 + 7 * c;
+      let volley = c >= 0.99 ? 1 : 0;
+      let col = this.color;
+      if (perfect) {
+        dmg *= 1.6;
+        sp *= 1.35;
+        rad += 3;
+        volley = 2;                       /* starts the rally two exchanges in */
+        col = U.mixHex(this.color, '#ffffff', 0.45);
+        a.addKi(12);
+      }
+
       const orb = a.spawnOrb({
         x: this.x + Math.cos(this.aim) * 24,
         y: this.y + Math.sin(this.aim) * 24,
         angle: this.aim, speed: sp,
         owner: 'player', damage: dmg,
-        r: 9 + 7 * c, volley: c >= 0.99 ? 1 : 0,
-        color: this.color, homing: st.homing || 0,
+        r: rad, volley,
+        color: col, homing: st.homing || 0,
         grace: 0.02,
       });
       A.play('fire', c);
+      if (perfect) {
+        A.play('charge_perfect');
+        FX.stop(0.05);
+        FX.chromatic(0.6);
+        FX.shake(9);
+        FX.screenFlash('#ffffff', 0.14);
+        FX.text(this.x, this.y - 52, 'PERFECT RELEASE', { color: '#ffffff', size: 19, crit: true, shadow: true });
+        FX.ring({ x: this.x, y: this.y, r: 10, rEnd: 130, life: 0.4, color: '#ffffff', w: 4 });
+        FX.ring({ x: this.x, y: this.y, r: 6, rEnd: 90, life: 0.3, color: col, w: 3, squash: 0.4, angle: this.aim });
+      }
       FX.shake(3 + c * 5);
       FX.ring({
         x: this.x + Math.cos(this.aim) * 20, y: this.y + Math.sin(this.aim) * 20,
@@ -599,10 +711,25 @@
         ctx.arc(this.x, this.y, cr, -Math.PI / 2, -Math.PI / 2 + U.TAU * this.charge);
         ctx.stroke();
         if (this.charge >= 1) {
-          ctx.strokeStyle = U.rgba('#ffffff', 0.4 + 0.3 * Math.sin(a.time * 18));
-          ctx.lineWidth = 1.5;
-          U.poly(ctx, this.x, this.y, 3, cr + 7, null, a.time * 4);
-          ctx.stroke();
+          const since = this.chargeFullT >= 0 ? a.time - this.chargeFullT : 99;
+          const inBeat = since <= PERFECT_RELEASE;
+          if (inBeat) {
+            /* the beat: a white ring closing onto the charge ring. Release now. */
+            const k = U.clamp(since / PERFECT_RELEASE, 0, 1);
+            ctx.strokeStyle = U.rgba('#ffffff', 0.95 - k * 0.25);
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(this.x, this.y, cr + 14 * (1 - k), 0, U.TAU); ctx.stroke();
+            ctx.strokeStyle = U.rgba('#ffffff', 0.9);
+            ctx.lineWidth = 2;
+            U.poly(ctx, this.x, this.y, 3, cr + 7, null, a.time * 6);
+            ctx.stroke();
+          } else {
+            /* beat missed — settle to plain gold so the miss is legible */
+            ctx.strokeStyle = U.rgba(this.color, 0.35 + 0.15 * Math.sin(a.time * 6));
+            ctx.lineWidth = 1.5;
+            U.poly(ctx, this.x, this.y, 3, cr + 7, null, a.time * 2);
+            ctx.stroke();
+          }
         }
         ctx.restore();
       }
@@ -733,6 +860,7 @@
       this.stunT = 0;
       this.knock = { x: 0, y: 0 };
       this.shieldedBy = null;
+      this.shieldBroken = false;   /* shattered permanently by a 3+ rally */
       this.summoned = [];
       this.fuse = 0;
       this.bobPhase = R.range(0, U.TAU);
@@ -745,9 +873,33 @@
 
     /* returns true if incoming angle is blocked by the shield arc */
     blocks(fromAngle) {
-      if (!this.def.shieldArc) return false;
+      if (!this.def.shieldArc || this.shieldBroken) return false;
       const d = Math.abs(U.angDiff(this.facing, fromAngle + Math.PI));
       return d < this.def.shieldArc / 2;
+    }
+
+    /* Shatter the front shield for the rest of the room. */
+    breakShield(a) {
+      if (this.shieldBroken) return;
+      this.shieldBroken = true;
+      const arc = this.def.shieldArc;
+      A.play('shield_break');
+      A.duck(0.3, 0.4);
+      FX.stop(0.08);
+      FX.shake(14);
+      FX.slow(0.14, 0.4);
+      FX.ring({ x: this.x, y: this.y, r: this.r + 9, rEnd: this.r + 90, life: 0.45, color: '#6be6ff', w: 6, arc, angle: this.facing });
+      FX.ring({ x: this.x, y: this.y, r: this.r + 9, rEnd: this.r + 55, life: 0.3, color: '#ffffff', w: 3, arc, angle: this.facing });
+      for (let i = 0; i < 22; i++) {
+        const ang = this.facing + R.spread(arc / 2);
+        FX.particle({
+          x: this.x + Math.cos(ang) * (this.r + 9), y: this.y + Math.sin(ang) * (this.r + 9),
+          vx: Math.cos(ang) * R.range(120, 420), vy: Math.sin(ang) * R.range(120, 420),
+          life: R.range(0.4, 0.9), r: R.range(2, 5), color: '#6be6ff', color2: '#ffffff',
+          shape: 'shard', spin: 9, drag: 0.94
+        });
+      }
+      FX.text(this.x, this.y - this.r - 26, 'SHIELD BROKEN', { color: '#6be6ff', size: 20, crit: true, shadow: true });
     }
 
     canParryNow() {
@@ -1125,20 +1277,29 @@
 
       ctx.restore();
 
-      /* shield arc */
-      if (this.def.shieldArc) {
+      /* shield arc — gone entirely once shattered */
+      if (this.def.shieldArc && !this.shieldBroken) {
+        const arc = this.def.shieldArc;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.strokeStyle = U.rgba('#6be6ff', 0.6);
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(x, y, this.r + 9, this.facing - this.def.shieldArc / 2, this.facing + this.def.shieldArc / 2);
+        ctx.arc(x, y, this.r + 9, this.facing - arc / 2, this.facing + arc / 2);
         ctx.stroke();
         ctx.strokeStyle = U.rgba('#ffffff', 0.25);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(x, y, this.r + 13, this.facing - this.def.shieldArc / 2, this.facing + this.def.shieldArc / 2);
+        ctx.arc(x, y, this.r + 13, this.facing - arc / 2, this.facing + arc / 2);
         ctx.stroke();
+        /* three pips = the rally needed to punch through */
+        for (let i = 0; i < SHIELD_BREAK_VOLLEY; i++) {
+          const ang = this.facing + (i - 1) * (arc / 4);
+          ctx.fillStyle = U.rgba('#6be6ff', 0.9);
+          ctx.beginPath();
+          ctx.arc(x + Math.cos(ang) * (this.r + 9), y + Math.sin(ang) * (this.r + 9), 2.2, 0, U.TAU);
+          ctx.fill();
+        }
         ctx.restore();
       }
 

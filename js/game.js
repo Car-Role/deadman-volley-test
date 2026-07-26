@@ -6,7 +6,9 @@
 (function () {
   const U = DV.U, FX = DV.FX, R = U.rnd, A = DV.Audio, C = DV.Content, IN = DV.Input, UI = DV.UI;
 
-  const W = 1280, H = 720;
+  let W = DV.STAGE.w, H = DV.STAGE.h;
+  DV.onStage(() => { W = DV.STAGE.w; H = DV.STAGE.h; });
+
   const SAVE_META = 'dv_meta_v1';
   const SAVE_SET = 'dv_settings_v1';
   const SAVE_RUN = 'dv_run_v1';
@@ -32,6 +34,8 @@
   const DEFAULT_SETTINGS = {
     volMaster: 0.85, volSfx: 0.9, volMusic: 0.5,
     shake: 1, particles: 1, flashes: true, dmgNumbers: true, aimAssist: true,
+    /* touch-only; harmless on desktop */
+    touchAssist: true, lefty: false, haptics: true, ctrlScale: 1,
   };
   const DEFAULT_META = {
     resolve: 0, runs: 0, wins: 0, bestRally: 0, totalKills: 0, totalDamageTaken: 0,
@@ -66,6 +70,9 @@
     A.setVol('sfx', s.volSfx);
     A.setVol('music', s.volMusic);
     FX.setSettings({ shake: s.shake, particles: s.particles, flashes: s.flashes ? 1 : 0 });
+    if (Game.touch && DV.Touch) DV.Touch.layout();
+    /* Touch Assist changes derived stats, so a live run must be rebuilt */
+    if (Game.run) rebuildStats(Game.run);
   };
 
   /* ---------- run save/resume ---------- */
@@ -169,6 +176,14 @@
 
     /* event bonuses */
     if (run.eventBonuses) mergeStats(st, run.eventBonuses);
+
+    /* Touch Assist — a visible, toggleable setting, not a hidden difficulty
+       change. Only ever applied when touch controls are actually in use. */
+    if (Game.touch && Game.settings && Game.settings.touchAssist) {
+      st.parryWindowMult = (st.parryWindowMult || 1) * 1.15;
+      st.perfectWindowMult = (st.perfectWindowMult || 1) * 1.15;
+      st.touchAim = 1;
+    }
 
     /* finalise */
     st.maxHp = Math.max(20, Math.round(st.maxHp * (st.maxHpMult || 1)));
@@ -911,6 +926,8 @@
       /* update() can end the room or the run, which clears Game.arena */
       if (Game.arena === arena) {
         arena.draw(ctx);
+        /* controls sit above the arena but below the death fade */
+        if (Game.touch && DV.Touch && arena.state !== 'dead') DV.Touch.draw(ctx, arena);
         if (Game.paused) {
           ctx.fillStyle = 'rgba(5,5,10,.55)';
           ctx.fillRect(0, 0, W, H);
@@ -923,28 +940,62 @@
       UI.tickMap(dt);
     }
 
+    if (Game.touch && DV.Touch) DV.Touch.endFrame();
     IN.endFrame();
   }
 
   /* ============================================================
      BOOT
      ============================================================ */
-  /* The game is authored in a fixed 1280x720 space. `q` is how many real device
-     pixels back each logical pixel, so text and vector art stay crisp on HiDPI
-     displays instead of being upscaled from a 720p buffer. */
+  /* Viewport in CSS px. visualViewport tracks the iOS URL bar, which
+     innerWidth/innerHeight do not. */
+  function viewport() {
+    const vv = window.visualViewport;
+    return {
+      w: Math.round((vv && vv.width) || window.innerWidth),
+      h: Math.round((vv && vv.height) || window.innerHeight),
+    };
+  }
+
+  /* Pick the logical stage. Desktop is the authored 1280x720 and never varies.
+     Mobile reshapes to the device so the arena fills the screen and entities
+     keep roughly their desktop on-screen size. */
+  function chooseStage(vp, touch) {
+    if (!touch) return { w: 1280, h: 720 };
+    const ratio = vp.h / vp.w;
+    if (ratio >= 1) {
+      return { w: 720, h: U.clamp(Math.round(720 * ratio), 1080, 1600) };
+    }
+    return { w: U.clamp(Math.round(720 / ratio), 1000, 1800), h: 720 };
+  }
+
+  /* `q` is how many device pixels back each logical pixel, so text and vector
+     art stay crisp on HiDPI instead of being upscaled from a low-res buffer. */
   function resize() {
-    const pad = 24;
-    const sx = (window.innerWidth - pad) / W;
-    const sy = (window.innerHeight - pad) / H;
-    const s = Math.max(0.3, Math.min(sx, sy));
-    document.getElementById('frame').style.setProperty('--scale', s);
+    const touch = Game.touch;
+    const vp = viewport();
+    const want = chooseStage(vp, touch);
+    const stageChanged = DV.setStage(want.w, want.h, { touch });
+    if (stageChanged && Game.arena) Game.arena.onStageChange();
+
+    const pad = touch ? 0 : 24;
+    const sx = (vp.w - pad) / W;
+    const sy = (vp.h - pad) / H;
+    const s = Math.max(0.2, Math.min(sx, sy));
+    const frame = document.getElementById('frame');
+    frame.style.setProperty('--scale', s);
+    frame.style.setProperty('--stage-w', W + 'px');
+    frame.style.setProperty('--stage-h', H + 'px');
 
     const dpr = window.devicePixelRatio || 1;
-    const q = U.clamp(s * dpr, 1, 2.5);
+    /* cap harder on touch: phone GPUs pay for every one of these pixels */
+    const q = U.clamp(s * dpr, 1, touch ? 2 : 2.5);
     DV.RENDER.q = q;
 
     const cv = Game.canvas;
     if (cv) {
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
       const pw = Math.round(W * q), ph = Math.round(H * q);
       if (cv.width !== pw || cv.height !== ph) {
         cv.width = pw; cv.height = ph;
@@ -953,15 +1004,35 @@
     }
     const mc = document.getElementById('mapcanvas');
     if (mc) {
+      DV.MapGen.layoutFor(vp, touch);
       const MW = DV.MapGen.MW, MH = DV.MapGen.MH;
       const mq = U.clamp(dpr, 1, 2.5);
       const pw = Math.round(MW * mq), ph = Math.round(MH * mq);
       if (mc.width !== pw || mc.height !== ph) {
         mc.width = pw; mc.height = ph;
-        mc.style.width = MW + 'px'; mc.style.height = MH + 'px';
       }
+      mc.style.width = MW + 'px'; mc.style.height = MH + 'px';
       DV.RENDER.mq = mq;
+      if (stageChanged && Game.run && Game.run.map) DV.MapGen.relayout(Game.run.map);
     }
+  }
+
+  /* Best-effort: both of these are unsupported on iOS Safari and must fail quietly. */
+  function goFullscreen() {
+    const el = document.documentElement;
+    try {
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) {
+        const p = req.call(el);
+        if (p && p.catch) p.catch(() => { });
+      }
+    } catch (e) { /* not available */ }
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        const p = screen.orientation.lock('portrait');
+        if (p && p.catch) p.catch(() => { });
+      }
+    } catch (e) { /* not available */ }
   }
 
   function boot() {
@@ -976,19 +1047,42 @@
     Game.meta.seen = Game.meta.seen || {};
     Game.ambient = makeAmbient();
 
+    /* ---- touch detection ----
+       Capability, not user-agent. ?touch=1 / ?touch=0 forces it either way,
+       which is how the mobile build gets tested on a desktop browser. */
+    const q = new URLSearchParams(location.search);
+    const forced = q.get('touch');
+    const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    Game.touch = forced === '1' ? true : forced === '0' ? false
+      : (coarse && ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+
+    if (Game.touch) {
+      document.body.classList.add('touch');
+      /* phones pay for every particle; start conservative but keep it tunable */
+      if (Game.settings.particlesTouchDefaulted !== true) {
+        Game.settings.particles = Math.min(Game.settings.particles, 0.6);
+        Game.settings.particlesTouchDefaulted = true;
+      }
+    }
+
     IN.attach(Game.canvas);
+    if (Game.touch && DV.Touch) DV.Touch.init(Game);
     UI.init(Game);
     Game.applySettings();
 
     resize();
     window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
-    /* audio unlock */
+    /* audio unlock — also the only user gesture we get, so fullscreen and the
+       orientation lock have to be requested from here too */
     const cc = document.getElementById('clickcatch');
     const unlock = () => {
       A.init(); A.resume();
       Game.applySettings();
       cc.classList.add('gone');
+      if (Game.touch) goFullscreen();
       UI.renderTitle();
       window.removeEventListener('keydown', unlock);
     };

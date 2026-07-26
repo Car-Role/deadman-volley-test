@@ -5,7 +5,6 @@
    ============================================================ */
 DV.Input = (function () {
   const U = DV.U;
-  const LOGICAL_W = 1280, LOGICAL_H = 720;
 
   const down = Object.create(null);
   const pressed = Object.create(null);
@@ -58,14 +57,16 @@ DV.Input = (function () {
       mb[0] = mb[1] = mb[2] = false;
     });
 
-    /* Map the pointer into the game's logical 1280x720 space. The canvas
-       backing store may be larger (HiDPI), so never use canvas.width here. */
+    /* Map the pointer into the game's logical stage space. The canvas backing
+       store may be larger (HiDPI) and the stage reshapes on mobile, so never
+       use canvas.width or a hardcoded size here. */
     const upd = e => {
       const r = canvas.getBoundingClientRect();
+      const LW = DV.STAGE.w, LH = DV.STAGE.h;
       mouse.rawX = e.clientX; mouse.rawY = e.clientY;
-      mouse.x = ((e.clientX - r.left) / r.width) * LOGICAL_W;
-      mouse.y = ((e.clientY - r.top) / r.height) * LOGICAL_H;
-      mouse.inside = mouse.x >= 0 && mouse.y >= 0 && mouse.x <= LOGICAL_W && mouse.y <= LOGICAL_H;
+      mouse.x = ((e.clientX - r.left) / r.width) * LW;
+      mouse.y = ((e.clientY - r.top) / r.height) * LH;
+      mouse.inside = mouse.x >= 0 && mouse.y >= 0 && mouse.x <= LW && mouse.y <= LH;
       usingPad = false;
     };
     window.addEventListener('mousemove', upd);
@@ -121,11 +122,18 @@ DV.Input = (function () {
     confirm: [PAD.A],
   };
 
+  /* ---- touch delegation ----
+     DV.Touch returns null / false when it has nothing to say, so the
+     keyboard + mouse + gamepad paths below stay exactly as they were. */
+  const T = () => (DV.Touch && DV.Touch.enabled && DV.Touch.isActive()) ? DV.Touch : null;
+
   /* ---- public queries ---- */
   function key(code) { return !!down[code]; }
   function keyHit(code) { return !!pressed[code]; }
 
   function act(name) {
+    const t = T();
+    if (t && name === 'dash' && t.actHit('dash')) return true;
     const b = BINDS[name];
     if (b) for (const c of b) if (down[c]) return true;
     const p = PADBINDS[name];
@@ -134,6 +142,8 @@ DV.Input = (function () {
     return false;
   }
   function actHit(name) {
+    const t = T();
+    if (t && t.actHit(name)) return true;
     const b = BINDS[name];
     if (b) for (const c of b) if (pressed[c]) return true;
     const p = PADBINDS[name];
@@ -141,13 +151,18 @@ DV.Input = (function () {
     return false;
   }
 
-  function fireDown() { return mb[0] || padAxes.rt > 0.45; }
-  function fireHit() { return mbPressed[0] || (padPressed[PAD.RT]); }
-  function fireUp() { return mbReleased[0] || padReleased[PAD.RT]; }
-  function parryHit() { return mbPressed[2] || padPressed[PAD.RB] || pressed['KeyK'] || pressed['KeyJ'] || padPressed[PAD.B]; }
+  function fireDown() { const t = T(); if (t && t.fireDown()) return true; return !!(mb[0] || padAxes.rt > 0.45); }
+  function fireHit() { return !!(mbPressed[0] || padPressed[PAD.RT]); }
+  function fireUp() { return !!(mbReleased[0] || padReleased[PAD.RT]); }
+  function parryHit() {
+    const t = T(); if (t && t.parryHit()) return true;
+    return !!(mbPressed[2] || padPressed[PAD.RB] || pressed['KeyK'] || pressed['KeyJ'] || padPressed[PAD.B]);
+  }
 
   /* movement vector, normalised */
   function moveVec() {
+    const t = T();
+    if (t) { const tv = t.moveVec(); if (tv) return tv; }
     let x = 0, y = 0;
     if (act('left')) x -= 1;
     if (act('right')) x += 1;
@@ -162,6 +177,8 @@ DV.Input = (function () {
   /* aim: pad right-stick keeps a persistent angle, else mouse */
   let padAim = 0;
   function aimAngle(fromX, fromY) {
+    const t = T();
+    if (t) { const ta = t.aimAngle(fromX, fromY); if (ta != null) return ta; }
     if (usingPad && (Math.abs(padAxes.rx) > 0.1 || Math.abs(padAxes.ry) > 0.1)) {
       padAim = Math.atan2(padAxes.ry, padAxes.rx);
     }
@@ -182,6 +199,7 @@ DV.Input = (function () {
 
   function clearAll() {
     for (const k in down) down[k] = false;
+    if (DV.Touch && DV.Touch.enabled) DV.Touch.clearAll();
     endFrame();
   }
 

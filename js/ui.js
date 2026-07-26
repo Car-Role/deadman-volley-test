@@ -62,19 +62,34 @@ DV.UI = (function () {
   }
   function positionTooltip(e) {
     const t = tip();
-    const stage = $('ui').getBoundingClientRect();
-    const scale = stage.width / 1280;
+    const ui = $('ui');
+    const stage = ui.getBoundingClientRect();
+    /* on touch #ui is unscaled and viewport-sized; on desktop it is the scaled stage */
+    const touch = G && G.touch;
+    const scale = touch ? 1 : (stage.width / DV.STAGE.w);
+    const boxW = touch ? stage.width : DV.STAGE.w;
+    const boxH = touch ? stage.height : DV.STAGE.h;
     let x = (e.clientX - stage.left) / scale + 16;
     let y = (e.clientY - stage.top) / scale + 16;
     const r = t.getBoundingClientRect();
     const w = r.width / scale, h = r.height / scale;
-    if (x + w > 1280 - 12) x = x - w - 32;
-    if (y + h > 720 - 12) y = 720 - h - 12;
+    if (x + w > boxW - 12) x = Math.max(8, x - w - 32);
+    if (y + h > boxH - 12) y = Math.max(8, boxH - h - 12);
     t.style.left = x + 'px';
     t.style.top = y + 'px';
   }
   function hideTooltip() { tip().style.display = 'none'; }
   function bindTip(node, data) {
+    if (G && G.touch) {
+      /* no hover on touch — tap toggles, tapping elsewhere dismisses */
+      node.addEventListener('click', e => {
+        e.stopPropagation();
+        if (tip().style.display === 'block' && tip().dataset.owner === data.name) { hideTooltip(); return; }
+        showTooltip(e, data);
+        tip().dataset.owner = data.name;
+      });
+      return;
+    }
     node.addEventListener('mouseenter', e => showTooltip(e, data));
     node.addEventListener('mousemove', e => positionTooltip(e));
     node.addEventListener('mouseleave', hideTooltip);
@@ -82,6 +97,8 @@ DV.UI = (function () {
 
   /* cards wrap onto a second row past 4 — shrink them so both rows fit */
   function fitCards(row) {
+    /* on touch the row is a horizontal snap rail, so density never applies */
+    if (G && G.touch) { row.classList.remove('dense'); row.scrollLeft = 0; return; }
     row.classList.toggle('dense', row.children.length > 4);
   }
 
@@ -179,7 +196,9 @@ DV.UI = (function () {
       <div class="rs sh"><span class="l">Shards</span><span class="v">${run.shards}</span></div>
       <div class="rs"><span class="l">Sigils</span><span class="v">${run.sigils.length}</span></div>
       <div class="rs"><span class="l">Best Rally</span><span class="v">×${run.bestRally}</span></div>`;
-    $('map-hint').textContent = 'Click a lit node to advance · hover any node to preview the paths beyond it';
+    $('map-hint').textContent = G.touch
+      ? 'Tap a node to preview the paths beyond it · tap again to enter'
+      : 'Click a lit node to advance · hover any node to preview the paths beyond it';
     DV.MapGen.resetHoverCache();
     show('scr-map');
     A.setMusic('map');
@@ -226,6 +245,29 @@ DV.UI = (function () {
       if (!G.run || !G.run.map) return;
       const p = toLocal(e);
       const n = DV.MapGen.hitTest(G.run.map, p.x, p.y);
+
+      /* Touch has no hover, so a single tap would enter a room with no preview.
+         First tap previews the routes beyond the node; second tap commits. */
+      if (G.touch) {
+        if (!n) { mapHover = null; hideTooltip(); return; }
+        if (mapHover !== n) {
+          mapHover = n;
+          A.play('ui_move');
+          const T = DV.MapGen.NODE_TYPES[n.type];
+          const mod = n.modifier ? C.MODIFIERS.find(m => m.id === n.modifier) : null;
+          showTooltip(e, {
+            name: n.type === 'boss' ? C.BOSS_MAP[n.bossId].name : T.name,
+            kind: n.available ? 'Tap again to enter' : n.visited ? 'Cleared' : 'Locked',
+            color: T.color,
+            desc: T.desc + (mod ? `<br><b style="color:${mod.color}">${mod.name}:</b> ${mod.desc}` : ''),
+          });
+          return;
+        }
+        if (n.available) { A.play('ui_confirm'); hideTooltip(); mapHover = null; G.enterNode(n); }
+        else A.play('ui_deny');
+        return;
+      }
+
       if (n && n.available) { A.play('ui_confirm'); hideTooltip(); G.enterNode(n); }
       else if (n) A.play('ui_deny');
     });
@@ -461,6 +503,14 @@ DV.UI = (function () {
     toggle('Screen Flashes', 'Bright full-screen flashes on big hits.', 'flashes');
     toggle('Show Damage Numbers', 'Floating numbers on every hit.', 'dmgNumbers');
     toggle('Aim Assist', 'Slight magnetism when parrying toward an enemy.', 'aimAssist');
+
+    if (G.touch) {
+      toggle('Touch Assist', 'Widens the parry and perfect windows by 15% to offset touch latency.', 'touchAssist');
+      toggle('Left-handed Layout', 'Mirrors the stick and buttons.', 'lefty');
+      toggle('Haptics', 'Vibrate on perfect parries and big hits.', 'haptics');
+      slider('Control Size', 'Scale of the on-screen buttons.', 'ctrlScale',
+        v => Math.round(v * 100) + '%');
+    }
 
     const row = el('div', 'setrow');
     row.innerHTML = `<div class="lbl">Erase All Progress<small>Deletes meta upgrades, unlocks, and any saved run.</small></div>`;

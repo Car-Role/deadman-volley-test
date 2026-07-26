@@ -63,13 +63,20 @@ sandbox.removeEventListener = noop;
 vm.createContext(sandbox);
 
 /* load only the logic modules — ui.js and game.js are DOM-bound */
-const MODULES = ['util.js', 'audio.js', 'input.js', 'fx.js', 'content.js', 'entities.js', 'arena.js', 'map.js'];
+const MODULES = ['util.js', 'audio.js', 'input.js', 'fx.js', 'touch.js', 'content.js', 'entities.js', 'arena.js', 'map.js'];
 for (const f of MODULES) {
   const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
   vm.runInContext(src, sandbox, { filename: 'js/' + f });
 }
 const DV = sandbox.DV;
 const U = DV.U, C = DV.Content, IN = DV.Input;
+
+/* --stage=portrait runs the identical sweep on the mobile vertical arena,
+   which is how we prove the geometry refactor did not break the game. */
+const STAGE_MODE = args.stage || 'desktop';
+if (STAGE_MODE === 'portrait') DV.setStage(720, 1280, { touch: true });
+else if (STAGE_MODE === 'landscape') DV.setStage(1280, 720, { touch: true });
+console.log(`stage: ${STAGE_MODE} (${DV.STAGE.w}x${DV.STAGE.h}, touch=${DV.STAGE.touch})`);
 
 /* ============================================================
    Fake Game shell (the part arena.js actually touches)
@@ -461,6 +468,7 @@ function main() {
   const slow = results.slice().sort((a, b) => b.slowestFrame - a.slowestFrame).slice(0, 5);
   const timeouts = results.filter(r => r.timedOut);
   console.log('\n──────── SOAK REPORT ────────');
+  console.log(`stage           : ${STAGE_MODE} ${DV.STAGE.w}x${DV.STAGE.h}`);
   console.log(`rooms simulated : ${results.length}`);
   console.log(`failures        : ${failures.length}`);
   console.log(`timeouts        : ${timeouts.length}${timeouts.length ? ' -> ' + timeouts.slice(0, 6).map(t => t.label).join(', ') : ''}`);

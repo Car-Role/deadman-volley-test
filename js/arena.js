@@ -6,9 +6,34 @@
 (function () {
   const U = DV.U, FX = DV.FX, R = U.rnd, A = DV.Audio, C = DV.Content;
 
-  const W = 1280, H = 720;
+  /* Logical stage size. Mutable: mobile reshapes it (see DV.STAGE). */
+  let W = DV.STAGE.w, H = DV.STAGE.h;
+  DV.onStage(() => { W = DV.STAGE.w; H = DV.STAGE.h; });
+
   /* rally needed to punch through a Sentinel's shield — mirrored in entities.js */
   const SHIELD_BREAK_VOLLEY = 3;
+
+  /* Haptics. Android-only in practice; a silent no-op everywhere else. */
+  function buzz(pattern) {
+    const g = DV.Game;
+    if (!g || !g.touch || !g.settings || !g.settings.haptics) return;
+    if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (e) { } }
+  }
+
+  /* Arena inset. On touch the bottom band is reserved for thumbs so the
+     action never hides under the player's hands. */
+  function computeBounds() {
+    const st = DV.STAGE;
+    if (!st.touch) {
+      const pad = 74;
+      return { x: pad, y: pad + 24, w: W - pad * 2, h: H - pad * 2 - 24 };
+    }
+    const padX = st.portrait ? 34 : 56;
+    const top = st.portrait ? 104 : 74;
+    /* must equal DV.Touch's control band, or buttons overlap the playfield */
+    const bottom = st.portrait ? 310 : 160;
+    return { x: padX, y: top, w: W - padX * 2, h: H - top - bottom };
+  }
 
   class Arena {
     constructor(game, room) {
@@ -18,8 +43,7 @@
       this.st = this.run.stats;
       this.rng = U.makeRNG((this.run.seed + room.index * 7919) >>> 0);
 
-      const pad = 74;
-      this.bounds = { x: pad, y: pad + 24, w: W - pad * 2, h: H - pad * 2 - 24 };
+      this.bounds = computeBounds();
 
       this.time = 0;
       this.realTime = 0;
@@ -88,6 +112,36 @@
       }
 
       this.setupRoom();
+    }
+
+    /* The device rotated (or the window resized) mid-room. Rebuild the arena
+       to the new stage and pull everything back inside it — nothing may be
+       left stranded outside the walls. */
+    onStageChange() {
+      const old = this.bounds;
+      const b = this.bounds = computeBounds();
+
+      /* map old positions proportionally into the new box so the fight keeps its shape */
+      const remap = (e) => {
+        const fx = old.w ? (e.x - old.x) / old.w : 0.5;
+        const fy = old.h ? (e.y - old.y) / old.h : 0.5;
+        const r = e.r || 0;
+        e.x = U.clamp(b.x + fx * b.w, b.x + r, b.x + b.w - r);
+        e.y = U.clamp(b.y + fy * b.h, b.y + r, b.y + b.h - r);
+      };
+      if (this.player) { remap(this.player); this.player.afterimages.length = 0; }
+      for (const e of this.enemies) remap(e);
+      for (const o of this.orbs) { remap(o); o.trail.length = 0; }
+      for (const p of this.pickups) remap(p);
+      if (this.decoy) remap(this.decoy);
+      for (const g of this.wells) remap(g);
+
+      /* backdrop fields are sized to the stage */
+      for (const s of this.stars) { s.x = R.range(0, W); s.y = R.range(0, H); }
+      for (const m of this.motes) {
+        m.x = R.range(b.x, b.x + b.w);
+        m.y = R.range(b.y, b.y + b.h);
+      }
     }
 
     /* ============================================================
@@ -410,6 +464,7 @@
 
       A.play('hurt');
       A.duck(0.42, 0.35);
+      buzz([0, 30, 40, 30]);
       FX.shake(15, 3.5);
       FX.stop(0.09);
       FX.screenFlash('#ff4d5e', 0.3, 5);
@@ -514,7 +569,8 @@
       if (tgt && tgt.alive && aimOverride == null) {
         const want = U.angTo(p.x, p.y, tgt.x, tgt.y);
         const diff = U.angDiff(ang, want);
-        if (Math.abs(diff) < 0.20) ang += diff * 0.85;
+        const cone = st.touchAim ? 0.38 : 0.20;   /* Touch Assist widens the cone */
+        if (Math.abs(diff) < cone) ang += diff * (st.touchAim ? 0.95 : 0.85);
       }
 
       /* growth */
@@ -638,6 +694,7 @@
           if (o !== orb && o.alive && o.owner === 'enemy' && o.volley < 2 && U.dist(p.x, p.y, o.x, o.y) < 130) o.kill(this);
         }
         this.hook('onPerfectParry', { orb, x: p.x, y: p.y });
+        buzz(18);
       } else {
         FX.stop(0.035);
         FX.shake(5 + Math.min(9, orb.volley));
@@ -1335,7 +1392,8 @@
       ctx.textBaseline = 'middle';
 
       /* ---- top-left: HP ---- */
-      const hx = 30, hy = 30, hw = 300, hh = 17;
+      const touch = DV.STAGE.touch, portrait = DV.STAGE.portrait;
+      const hx = touch ? 88 : 30, hy = 30, hw = Math.min(300, W - (touch ? 400 : 320)), hh = 17;
       ctx.fillStyle = 'rgba(6,5,12,.8)';
       U.rr(ctx, hx - 3, hy - 3, hw + 6, hh + 6, 2); ctx.fill();
       ctx.fillStyle = 'rgba(255,77,94,.13)';
@@ -1406,22 +1464,22 @@
       ctx.fillStyle = 'rgba(154,149,180,.95)';
       ctx.fillText(this.run.vessel.name.toUpperCase(), hx + st.dashCharges * 22 + 12, dy + 7);
 
-      /* ---- top-right: run info ---- */
+      /* ---- run info: top-right on wide stages, stacked in portrait ---- */
+      const label = this.room.type === 'boss' ? 'BOSS' : this.room.type === 'elite' ? 'ELITE' : `ROOM ${this.room.depth}`;
       ctx.textAlign = 'right';
       ctx.font = '700 20px "Rajdhani",sans-serif';
       ctx.fillStyle = this.sector.color;
       ctx.fillText(`SECTOR ${U.roman(this.room.sector)}`, W - 30, 32);
       ctx.font = '600 12px "Rajdhani",sans-serif';
       ctx.fillStyle = 'rgba(154,149,180,.95)';
-      const label = this.room.type === 'boss' ? 'BOSS' : this.room.type === 'elite' ? 'ELITE' : `ROOM ${this.room.depth}`;
       ctx.fillText(label + (this.modifier ? '  ·  ' + this.modifier.name.toUpperCase() : ''), W - 30, 52);
       ctx.font = '700 17px "Rajdhani",sans-serif';
       ctx.fillStyle = '#ffcf6b';
       ctx.fillText('◈ ' + this.run.shards, W - 30, 74);
 
-      /* ---- techniques ---- */
+      /* ---- techniques (on touch these are real buttons — see touch.js) ---- */
       const tx = W - 30, ty = H - 44;
-      for (let i = 0; i < p.techs.length; i++) {
+      for (let i = 0; !touch && i < p.techs.length; i++) {
         const t = C.TECH_MAP[p.techs[i]];
         if (!t) continue;
         const bx = tx - 56 - i * 66, by = ty - 22;
@@ -1449,7 +1507,7 @@
       }
 
       /* ---- buff chips (bottom-left) ---- */
-      let bxp = 30, byp = H - 40;
+      let bxp = touch ? 34 : 30, byp = H - (touch ? (portrait ? 344 : 194) : 40);
       const chips = [];
       if (p.chainT > 0) chips.push(['CHAIN', '#ff4d5e', p.chainT / 4]);
       if (p.bastionT > 0) chips.push(['BASTION', '#6be6ff', p.bastionT / 2.6]);
@@ -1513,8 +1571,8 @@
       /* ---- boss health bar ---- */
       const bosses = this.enemies.filter(e => e.isBoss && e.alive);
       if (bosses.length) {
-        const bw = 620, bh = 15;
-        const bx = (W - bw) / 2, by = H - 62;
+        const bw = Math.min(620, W - 80), bh = 15;
+        const bx = (W - bw) / 2, by = H - (touch ? (portrait ? 372 : 222) : 62);
         let total = 0, max = 0;
         for (const b of bosses) { total += Math.max(0, b.hp); max += b.maxHp; }
         const bd = C.BOSS_MAP[this.room.bossId];

@@ -885,6 +885,9 @@
       const arc = this.def.shieldArc;
       A.play('shield_break');
       A.duck(0.3, 0.4);
+      if (DV.Game && DV.Game.touch && DV.Game.settings && DV.Game.settings.haptics && navigator.vibrate) {
+        try { navigator.vibrate([0, 25, 30, 45]); } catch (e) { }
+      }
       FX.stop(0.08);
       FX.shake(14);
       FX.slow(0.14, 0.4);

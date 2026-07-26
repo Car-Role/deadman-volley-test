@@ -38,6 +38,32 @@ Then open <http://localhost:8781>.
 
 Gamepad is supported: left stick moves, right stick aims, **RT** fires, **RB** parries, **A** dashes.
 
+## On a phone
+
+Open the same URL on a phone and it switches to a purpose-built mobile layout — **portrait
+is the primary orientation**, with a genuinely vertical arena that fills the screen rather
+than a 16:9 desktop board squeezed into a strip. Rotating to landscape gives the wide arena
+with the controls overlaid.
+
+| Input | Action |
+|---|---|
+| Left thumb | Floating move stick — touch anywhere on the left to place it |
+| **Tap anywhere on the right** | **Parry.** The whole action side is live, so the most timing-critical input has the most forgiving target |
+| Drag on the right | Aim manually (a drag never fires a parry) |
+| Tap an enemy | Lock onto it |
+| `FIRE` | Hold to charge; the white ring closing in is the perfect-release beat |
+| `DASH` · `TECH` · `⏸` | Buttons in the thumb band |
+
+Aim **auto-locks** to a target with a reticle and a line from the player, so it is always
+obvious where a parry will send the orb — the strategic decision (*which* enemy gets the
+return) survives, without needing a second thumb for fine aiming.
+
+Settings has **Touch Assist** (on by default — widens the parry and perfect windows by 15%
+to offset touch latency), plus **Left-handed layout**, **Control size** and **Haptics**.
+
+Append `?touch=1` to the URL to force the mobile build on a desktop browser (and `?touch=0`
+to force the desktop one); this is how the mobile layout is tested.
+
 ---
 
 ## Reading the orb
@@ -102,9 +128,10 @@ Progress and settings save to `localStorage`. A run in progress can be resumed f
 ```
 index.html          markup + screen scaffolding
 css/style.css       all interface styling
-js/util.js          math, seeded RNG, easing, colour
+js/util.js          math, seeded RNG, easing, colour, the logical stage
 js/audio.js         fully procedural WebAudio (SFX + generative score) — no asset files
-js/input.js         keyboard / mouse / gamepad
+js/input.js         keyboard / mouse / gamepad (delegates to touch when active)
+js/touch.js         mobile controls: pointers, on-screen HUD, lock-on aim
 js/fx.js            particles, shockwaves, shake, hitstop, cached glow sprites
 js/content.js       all game data: vessels, sigils, techniques, enemies, bosses, events
 js/entities.js      Orb, Player, Enemy, Boss, Decoy, Pickup
@@ -128,6 +155,7 @@ bot, so stability and performance can be checked without a browser:
 
 ```bash
 node tools/soak.js                      # full sweep: 6 vessels x 4 sectors x every technique pair
+node tools/soak.js --stage=portrait     # same sweep on the mobile vertical arena
 node tools/soak.js --vessel=wraith      # one vessel
 node tools/soak.js --watchdog=2000      # abort if any frame exceeds 2000ms
 ```
@@ -156,3 +184,27 @@ and a hard cap with eviction.
 `createRadialGradient` per frame; with a screen full of high-volley orbs that alone
 could stall a frame for seconds. `FX.glow` blits a cached per-colour sprite instead —
 worst-case draw went from seconds to ~0.7ms at full native resolution.
+
+**Two parry exploits, both closed.** Catching used to test only "is the parry window
+open", with no owner check — so you could fire an orb into a wall and re-catch your own
+orb forever at ×1.30 damage per hit, no enemy involved. Separately, `orb.lastParryT` was
+written but never read, and collisions run up to six substeps per frame, so a single
+right-click re-parried the same orb four or five times while it was still inside your
+reach. Fixes: only hostile orbs are eligible (`Both Hands` re-opens self-parry, at the
+price of making the orb LIVE), plus a 0.30s per-orb lockout. Both are asserted in the soak.
+
+**Buttons inherit black.** `.echoice` is a `<button>` with no `color` set, so the event
+choice titles were rendering in the UA default black on a dark panel — a **1.05:1**
+contrast ratio. Worth remembering that any unstyled `<button>` text in a dark theme is
+invisible by default.
+
+**`setPointerCapture` can throw, and it was the first line of the handler.** It raises
+`NotFoundError` for a pointer the browser does not consider active, which killed the entire
+touch input path — stick, buttons, everything. Capture is an optimisation that keeps events
+flowing when a finger slides off the canvas; it is now wrapped in try/catch so it can never
+take input down with it.
+
+**The menus could not stay inside the game's scaled stage.** `#ui` used to inherit the
+canvas transform, so on a landscape phone (scale 0.508) 12px text rendered at ~6 CSS px.
+On touch, `#ui` drops the transform entirely and becomes a normal responsive layer; only
+the canvas keeps stage units.

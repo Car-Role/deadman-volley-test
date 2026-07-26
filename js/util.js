@@ -4,11 +4,36 @@
    ============================================================ */
 window.DV = window.DV || {};
 
-DV.VERSION = "1.0.3";
+DV.VERSION = "1.1.4";
 
 /* Backing-store resolution multipliers, set by game.js on resize.
-   All draw code works in logical 1280x720 units; `q` maps those to device pixels. */
+   All draw code works in logical stage units; `q` maps those to device pixels. */
 DV.RENDER = { q: 1, mq: 1 };
+
+/* ------------------------------------------------------------------
+   THE STAGE
+   Every draw call works in logical "stage" units. Desktop is a fixed
+   1280x720; mobile reshapes it so the arena fills the device — portrait
+   becomes a genuinely vertical playfield rather than a squeezed 16:9 strip.
+   Modules cache w/h locally and re-read them via onStage().
+   ------------------------------------------------------------------ */
+DV.STAGE = { w: 1280, h: 720, portrait: false, touch: false };
+
+(function () {
+  const listeners = [];
+  DV.onStage = (fn) => { listeners.push(fn); return fn; };
+  DV.setStage = function (w, h, opts) {
+    opts = opts || {};
+    const changed = DV.STAGE.w !== w || DV.STAGE.h !== h ||
+      (opts.touch != null && DV.STAGE.touch !== opts.touch);
+    DV.STAGE.w = w;
+    DV.STAGE.h = h;
+    DV.STAGE.portrait = h > w;
+    if (opts.touch != null) DV.STAGE.touch = opts.touch;
+    if (changed) for (const fn of listeners) { try { fn(DV.STAGE); } catch (e) { console.warn('onStage', e); } }
+    return changed;
+  };
+})();
 
 DV.U = (function () {
   const TAU = Math.PI * 2;

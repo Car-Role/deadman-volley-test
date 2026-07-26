@@ -33,7 +33,9 @@ html,body{
   color:var(--ink);
   font-family:var(--body-font);
   overflow:hidden;
+  overscroll-behavior:none;
   -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;
   user-select:none;
   cursor:default;
 }
@@ -45,13 +47,99 @@ html,body{
     radial-gradient(ellipse 120% 90% at 50% 0%, #12101f 0%, #05050a 60%, #000 100%);
 }
 
-/* The canvas + UI share one scaled 1280x720 stage */
+/* The canvas + UI share one scaled stage, sized by game.js via --stage-w/h */
 #game, #ui{
   position:absolute;
-  width:1280px; height:720px;
+  width:var(--stage-w,1280px); height:var(--stage-h,720px);
   left:50%; top:50%;
   transform:translate(-50%,-50%) scale(var(--scale,1));
   transform-origin:center center;
+}
+
+/* ============================================================
+   TOUCH / MOBILE
+   The canvas keeps the scaled stage (gameplay must stay in stage
+   units), but the DOM menus drop the transform entirely — inheriting
+   it is what made 12px text render at ~6 CSS px on a phone.
+   ============================================================ */
+body.touch #frame{
+  padding:env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+  touch-action:none;
+}
+body.touch #game{ touch-action:none; }
+
+body.touch #ui{
+  position:fixed;
+  inset:0;
+  left:0; top:0;
+  width:100%; height:100%;
+  height:100dvh;
+  transform:none;
+}
+body.touch .screen{
+  padding:calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+          calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+}
+body.touch .mbtn{ min-height:48px; padding:14px 20px; font-size:16px; }
+body.touch .scr-head h2{ font-size:clamp(22px,6vw,34px); }
+body.touch .scr-head .sub{ font-size:13px; }
+body.touch .menu{ width:min(320px,86vw); }
+body.touch .panel{ width:min(660px,94vw); padding:20px 18px 16px; }
+
+/* card rows become a horizontal snap rail — the natural mobile pattern */
+body.touch .card-row{
+  flex-wrap:nowrap;
+  justify-content:flex-start;
+  overflow-x:auto; overflow-y:hidden;
+  scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-x;
+  gap:14px; padding:8px 4px 14px;
+}
+body.touch .card-row.dense{ gap:14px; padding:8px 4px 14px; }
+body.touch .card,
+body.touch .card-row.dense .card{
+  flex:0 0 auto;
+  width:min(248px,72vw); min-height:0;
+  scroll-snap-align:center;
+  padding:16px 16px 14px;
+}
+body.touch .card .desc{ font-size:13px; }
+body.touch .card .flav{ display:none; }
+
+body.touch .char-layout{ grid-template-columns:1fr; gap:14px; overflow-y:auto; }
+body.touch .char-list{ flex-direction:row; overflow-x:auto; gap:10px; flex:0 0 auto; touch-action:pan-x; }
+body.touch .char-item{ flex:0 0 auto; min-width:200px; }
+body.touch .meta-grid{ grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); }
+body.touch .end-stats{ grid-template-columns:repeat(2,1fr); }
+body.touch .pause-cols{ grid-template-columns:1fr; }
+body.touch .settings-grid .setrow{ grid-template-columns:1fr 140px 52px; gap:10px; }
+body.touch .echoice{ padding:16px 18px; }
+body.touch .map-holder{ overflow:auto; touch-action:pan-x pan-y; }
+
+/* hover affordances are meaningless on touch */
+body.touch .card:hover{ transform:none; }
+body.touch .mbtn:hover{ box-shadow:none; }
+body.touch #tooltip{ max-width:min(300px,84vw); }
+
+/* the display title has to fit a 390px phone */
+body.touch .game-title{ font-size:clamp(34px,12vw,82px); }
+body.touch .tagline{ letter-spacing:.2em; font-size:11px; margin:8px 12px 22px; }
+body.touch .orb-emblem{ width:58px; height:58px; }
+body.touch .title-foot{ font-size:10.5px; bottom:14px; }
+
+/* run stats wrap instead of running off the edge */
+body.touch .scr-head.row{ flex-wrap:wrap; gap:10px; }
+body.touch .run-stats{ flex-wrap:wrap; gap:6px 16px; }
+body.touch .rs{ text-align:left; }
+body.touch .rs .v{ font-size:18px; }
+body.touch .rs .l{ font-size:9px; }
+
+/* portrait-specific trims */
+@media (orientation:portrait){
+  body.touch .scr-foot{ padding-top:12px; }
+  body.touch .end-stats{ grid-template-columns:repeat(2,1fr); }
 }
 #game{
   image-rendering:auto;

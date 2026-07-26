@@ -6,7 +6,23 @@
 DV.MapGen = (function () {
   const U = DV.U, C = DV.Content;
 
-  const MW = 1160, MH = 440;
+  /* Map canvas size. Desktop is the authored landscape board; mobile portrait
+     flows the graph top-to-bottom instead, sized to the device. */
+  let MW = 1160, MH = 440;
+  let VERTICAL = false;
+
+  function layoutFor(vp, touch) {
+    if (!touch) { MW = 1160; MH = 440; VERTICAL = false; return; }
+    const portrait = vp.h >= vp.w;
+    VERTICAL = portrait;
+    if (portrait) {
+      MW = Math.round(Math.min(vp.w - 24, 560));
+      MH = Math.round(Math.min(vp.h * 0.66, 900));
+    } else {
+      MW = Math.round(Math.min(vp.w - 24, 1160));
+      MH = Math.round(Math.min(vp.h * 0.56, 440));
+    }
+  }
 
   const NODE_TYPES = {
     combat: { name: 'Combat', glyph: '⚔', color: '#9a95b4', desc: 'A room of the dead. Clear it.' },
@@ -115,27 +131,47 @@ DV.MapGen = (function () {
     }
 
     /* ---------- layout ---------- */
-    const padX = 90, padY = 52;
-    const usableW = MW - padX * 2;
-    const usableH = MH - padY * 2;
-    for (const n of kept) {
-      const rowsUsed = ROWS;
-      n.x = padX + (n.row / (rowsUsed - 1)) * usableW;
-      const cols = kept.filter(k => k.row === n.row).sort((a, b) => a.col - b.col);
-      const idx = cols.indexOf(n);
-      const span = cols.length;
-      n.y = padY + usableH * (span === 1 ? 0.5 : (idx / (span - 1)));
-      /* deterministic jitter */
-      const j = U.makeRNG(n.seed);
-      n.x += j.range(-14, 14);
-      n.y += j.range(-12, 12);
-      n.y = U.clamp(n.y, padY, MH - padY);
-    }
+    layoutNodes(kept, ROWS);
 
     /* starting availability */
     for (const n of kept) if (n.row === 0) n.available = true;
 
     return { sector, sectorN, nodes: kept, rows: ROWS, current: null };
+  }
+
+  /* Place nodes. Landscape runs rows left->right; portrait runs them
+     top->bottom so a phone reads the board naturally. */
+  function layoutNodes(nodes, rows) {
+    /* asymmetric along the axis: the last row needs room for its label */
+    const padA0 = VERTICAL ? 40 : 90;
+    const padA1 = VERTICAL ? 74 : 90;
+    const padB = VERTICAL ? 54 : 52;   // across the axis
+    const axisLen = (VERTICAL ? MH : MW) - padA0 - padA1;
+    const crossLen = (VERTICAL ? MW : MH) - padB * 2;
+
+    for (const n of nodes) {
+      const along = padA0 + (n.row / Math.max(1, rows - 1)) * axisLen;
+      const peers = nodes.filter(k => k.row === n.row).sort((a, b) => a.col - b.col);
+      const idx = peers.indexOf(n);
+      const span = peers.length;
+      const across = padB + crossLen * (span === 1 ? 0.5 : (idx / (span - 1)));
+
+      const j = U.makeRNG(n.seed);
+      if (VERTICAL) {
+        n.y = along + j.range(-12, 12);
+        n.x = U.clamp(across + j.range(-14, 14), padB, MW - padB);
+      } else {
+        n.x = along + j.range(-14, 14);
+        n.y = U.clamp(across + j.range(-12, 12), padB, MH - padB);
+      }
+    }
+  }
+
+  /* re-place an existing map after an orientation / size change */
+  function relayout(map) {
+    if (!map) return;
+    layoutNodes(map.nodes, map.rows);
+    resetHoverCache();
   }
 
   function advance(map, node) {
@@ -257,10 +293,15 @@ DV.MapGen = (function () {
     const cl = hover ? forwardClosure(hover) : null;
 
     const edgePath = (n, nx) => {
-      const mx = (n.x + nx.x) / 2;
       ctx.beginPath();
       ctx.moveTo(n.x, n.y);
-      ctx.bezierCurveTo(mx, n.y, mx, nx.y, nx.x, nx.y);
+      if (VERTICAL) {
+        const my = (n.y + nx.y) / 2;
+        ctx.bezierCurveTo(n.x, my, nx.x, my, nx.x, nx.y);
+      } else {
+        const mx = (n.x + nx.x) / 2;
+        ctx.bezierCurveTo(mx, n.y, mx, nx.y, nx.x, nx.y);
+      }
     };
 
     const tiers = [[], [], [], []];   /* 0 base, 1 walked, 2 live, 3 highlighted */
@@ -402,8 +443,16 @@ DV.MapGen = (function () {
     for (let r = 0; r < map.rows; r++) {
       const xs = map.nodes.filter(n => n.row === r);
       if (!xs.length) continue;
-      const x = xs.reduce((a, n) => a + n.x, 0) / xs.length;
-      ctx.fillText(r === map.rows - 1 ? 'BOSS' : String(r + 1), x, MH - 12);
+      const lbl = r === map.rows - 1 ? 'BOSS' : String(r + 1);
+      if (VERTICAL) {
+        const y = xs.reduce((a, n) => a + n.y, 0) / xs.length;
+        ctx.textAlign = 'left';
+        ctx.fillText(lbl, 10, y);
+      } else {
+        const x = xs.reduce((a, n) => a + n.x, 0) / xs.length;
+        ctx.textAlign = 'center';
+        ctx.fillText(lbl, x, MH - 12);
+      }
     }
     ctx.restore();
   }
@@ -416,5 +465,10 @@ DV.MapGen = (function () {
     return null;
   }
 
-  return { generate, advance, buildRoom, draw, hitTest, forwardClosure, resetHoverCache, NODE_TYPES, MW, MH };
+  return {
+    generate, advance, buildRoom, draw, hitTest, forwardClosure, resetHoverCache,
+    layoutFor, relayout, NODE_TYPES,
+    get MW() { return MW; }, get MH() { return MH; },
+    get vertical() { return VERTICAL; },
+  };
 })();

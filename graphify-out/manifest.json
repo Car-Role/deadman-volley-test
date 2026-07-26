@@ -1,0 +1,77 @@
+{
+  ".claude/launch.json": {
+    "mtime": 1785049393.533926,
+    "ast_hash": "efbadec2f24ed0a96a761c01bacc8808",
+    "semantic_hash": ""
+  },
+  "js/arena.js": {
+    "mtime": 1785085427.1009717,
+    "ast_hash": "e425b9a216b0776636bad2f85590acc4",
+    "semantic_hash": ""
+  },
+  "js/audio.js": {
+    "mtime": 1785085435.1537218,
+    "ast_hash": "901a3b7d08ca12abeb9d42d0e17be82a",
+    "semantic_hash": ""
+  },
+  "js/content.js": {
+    "mtime": 1785085217.98438,
+    "ast_hash": "4d21f4136e8d50e12fd38a593033fad3",
+    "semantic_hash": ""
+  },
+  "js/entities.js": {
+    "mtime": 1785085366.9403968,
+    "ast_hash": "cc66e9b2a931020cfd555cd4c64cd8ab",
+    "semantic_hash": ""
+  },
+  "js/fx.js": {
+    "mtime": 1785049854.572897,
+    "ast_hash": "6af2a5005fdb20b83071f164b3932278",
+    "semantic_hash": ""
+  },
+  "js/game.js": {
+    "mtime": 1785050570.263956,
+    "ast_hash": "e9632465ec61623ca3d5983aed4f9110",
+    "semantic_hash": ""
+  },
+  "js/input.js": {
+    "mtime": 1785050203.9523358,
+    "ast_hash": "2aaf24e6b28ac64574640564372d54f9",
+    "semantic_hash": ""
+  },
+  "js/map.js": {
+    "mtime": 1785085481.9417243,
+    "ast_hash": "d35f39cea51bbfdd8fee506571d00b43",
+    "semantic_hash": ""
+  },
+  "js/ui.js": {
+    "mtime": 1785085489.9521024,
+    "ast_hash": "906eaa9233e6fa0a70ff680877473524",
+    "semantic_hash": ""
+  },
+  "js/util.js": {
+    "mtime": 1785085851.078326,
+    "ast_hash": "4ef89e9724be1ab8c22e1b5cef3d12de",
+    "semantic_hash": ""
+  },
+  "serve.py": {
+    "mtime": 1785049389.4311707,
+    "ast_hash": "71cec5c3123ad69d77f099ca45b91b81",
+    "semantic_hash": ""
+  },
+  "tools/soak.js": {
+    "mtime": 1785085661.458406,
+    "ast_hash": "3721df5111102d97ed525d31d36639f3",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1785086110.0451329,
+    "ast_hash": "d7093df20efa7ea44e054671cfa3c5eb",
+    "semantic_hash": ""
+  },
+  "index.html": {
+    "mtime": 1785085851.074742,
+    "ast_hash": "5dd9a434d86d978acd19e680455e2468",
+    "semantic_hash": ""
+  }
+}
